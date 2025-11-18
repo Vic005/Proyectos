@@ -14,10 +14,11 @@
         /* Estilos para los indicadores de estado */
         .status-pill { padding: 4px 10px; border-radius: 9999px; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; }
         .status-0 { background-color: #ffe0b2; color: #ff9800; } /* Pendiente */
-        .status-1 { background-color: #bbdefb; color: #2196f3; } /* Enviado */
-        .status-2 { background-color: #c8e6c9; color: #4caf50; } /* Realizado/Finalizado */
+        .status-1 { background-color: #bbdefb; color: #2196f3; } /* Ingresado */
+        .status-2 { background-color: #c8e6c9; color: #4caf50; } /* Realizado */
         .status-3 { background-color: #ffcdd2; color: #f44336; } /* Observado */
         .status-4 { background-color: #b2ebf2; color: #00bcd4; } /* Reingresado */
+        .status-5 { background-color: #d1c4e9; color: #673ab7; } /* Aprobado */
         
         /* Estilos de scrollbar personalizados */
         .custom-scroll::-webkit-scrollbar { width: 6px; }
@@ -26,7 +27,7 @@
         .summary-cell { min-width: 150px; }
         .project-row:hover { background-color: #f0f4f8; }
         
-        /* Estilos específicos para la tabla resumen */
+        /* Estilos específicos para las columnas pegajosas */
         .sticky-col-left-1 {
             position: sticky;
             left: 0;
@@ -34,7 +35,7 @@
         }
         .sticky-col-left-2 {
             position: sticky;
-            left: 100px; /* Ajustar según el ancho de la primera columna */
+            left: 80px; /* Ajustado para el código más pequeño */
             z-index: 10;
         }
         /* Color de fondo para las columnas pegajosas */
@@ -46,8 +47,8 @@
 <body class="p-4 md:p-8">
 
     <header class="max-w-7xl mx-auto mb-8">
-        <h1 class="text-3xl md:text-4xl font-bold text-gray-800 mb-2">Proyectos Actuales</h1>
-        <p class="text-gray-500">Los datos se guardan en el navegador.</p>
+        <h1 class="text-3xl md:text-4xl font-bold text-gray-800 mb-2">Gestor de Proyectos (Modo Local)</h1>
+        <p class="text-gray-500">Los datos se guardan en el navegador (LocalStorage).</p>
     </header>
     
     <!-- Controles de Pestañas -->
@@ -75,7 +76,7 @@
         <div class="bg-white rounded-xl shadow-2xl w-full max-w-xl max-h-[90vh] flex flex-col">
             <header class="p-6 border-b border-gray-200 flex justify-between items-center">
                 <h3 class="text-xl font-semibold text-gray-800">Notas para: <span id="modal-subproject-name" class="text-blue-600"></span></h3>
-                <button onclick="closeModal()" class="text-gray-400 hover:text-gray-600 transition">
+                <button onclick="closeModal('comments-modal')" class="text-gray-400 hover:text-gray-600 transition">
                     <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
                     </svg>
@@ -99,12 +100,39 @@
             </footer>
         </div>
     </div>
+    
+    <!-- Modal de Edición de Subproyectos (Nuevo) -->
+    <div id="edit-modal" class="fixed inset-0 bg-gray-900 bg-opacity-75 hidden items-center justify-center p-4 z-50">
+        <div class="bg-white rounded-xl shadow-2xl w-full max-w-lg max-h-[90vh] flex flex-col">
+            <header class="p-6 border-b border-gray-200 flex justify-between items-center">
+                <h3 class="text-xl font-semibold text-gray-800">Editar Subproyectos para: <span id="edit-modal-project-name" class="text-blue-600"></span></h3>
+                <button onclick="closeModal('edit-modal')" class="text-gray-400 hover:text-gray-600 transition">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                </button>
+            </header>
+
+            <div class="p-6 flex-grow custom-scroll overflow-y-auto">
+                <div id="edit-subproject-checklist" class="grid grid-cols-2 gap-3 p-4 bg-gray-50 rounded-lg border border-gray-200">
+                    <!-- Checklists se inyectarán aquí por JS -->
+                </div>
+            </div>
+
+            <footer class="p-6 border-t border-gray-200">
+                <button onclick="saveEditedSubprojects()"
+                        class="w-full bg-blue-600 text-white p-3 rounded-lg font-semibold hover:bg-blue-700 transition duration-150">
+                    Guardar Cambios
+                </button>
+            </footer>
+        </div>
+    </div>
 
 
     <!-- INICIO DE CÓDIGO JAVASCRIPT (Lógica de la aplicación) -->
     <script>
-        // --- 1. Datos Maestros ---
-        const LOCAL_STORAGE_KEY = 'projectManagerData';
+        // --- 1. Datos Maestros (ACTUALIZADOS) ---
+        const LOCAL_STORAGE_KEY = 'projectManagerDataV2'; // Cambiado para evitar conflictos con versión anterior
         
         const STATUSES = [
             { name: "Pendiente", class: "status-0" },
@@ -112,10 +140,9 @@
             { name: "Realizado", class: "status-2" },
             { name: "Observado", class: "status-3" },
             { name: "Reingresado", class: "status-4" },
-            { name: "Pendiente", class: "status-5" }
+            { name: "Aprobado", class: "status-5" }
         ];
         
-        // Lista completa de posibles subproyectos (usados para los encabezados de la tabla resumen)
         const ALL_SUBPROJECT_OPTIONS = [
             "Mediciones",
             "Paradero",
@@ -131,8 +158,8 @@
         let projectsData = []; // Cache para datos de proyectos
         let currentTab = 'input'; 
         let currentDetailProject = null; // Proyecto seleccionado en Tab 3
-        let selectedProjectId = null;
-        let selectedSubprojectId = null;
+        let selectedProjectId = null; // Usado para modales/edición
+        let selectedSubprojectId = null; // Usado para modales/edición
         
         // --- 3. Funciones de Persistencia (LocalStorage) ---
 
@@ -161,7 +188,13 @@
                 localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(projectsData));
             } catch (e) {
                 console.error("Error al guardar datos en LocalStorage:", e);
-                alert("Error al guardar los datos. El almacenamiento local puede estar lleno.");
+                // Usar un mensaje amigable en lugar de alert
+                const container = document.getElementById('tab-content-container');
+                container.insertAdjacentHTML('beforebegin', '<div id="save-error" class="p-4 mb-4 text-sm text-red-700 bg-red-100 rounded-lg max-w-7xl mx-auto" role="alert">Error al guardar los datos. El almacenamiento local puede estar lleno o hay un problema de estructura de datos.</div>');
+                setTimeout(() => {
+                    const errorEl = document.getElementById('save-error');
+                    if (errorEl) errorEl.remove();
+                }, 5000);
             }
         }
 
@@ -297,9 +330,8 @@
                 // Si estamos en el modal de Tab 2, re-renderizar solo las notas del modal
                 if (!isDetailTab) {
                      renderComments(updatedComments);
-                } else {
-                    // Si estamos en Tab 3, el renderTabContent() se encarga
                 }
+                // Si estamos en Tab 3, el renderTabContent() se encarga
             }
         };
 
@@ -342,8 +374,10 @@
                         break;
                     case 'detail':
                         // Asegurarse de que haya un proyecto seleccionado al entrar en la vista de detalle
-                        if (!currentDetailProject && projectsData.length > 0) {
-                             currentDetailProject = projectsData[0];
+                        if (projectsData.length > 0) {
+                             if (!currentDetailProject || !projectsData.find(p => p.id === currentDetailProject.id)) {
+                                currentDetailProject = projectsData[0];
+                             }
                         }
                         html = renderDetailTab();
                         break;
@@ -398,7 +432,7 @@
                     </div>
         
                     <h3 class="font-medium text-gray-700 mb-2">Seleccionar Subproyectos Requeridos:</h3>
-                    <div id="subproject-checklist" class="grid grid-cols-2 md:grid-cols-3 gap-3 p-4 bg-gray-50 rounded-lg mb-6 border border-gray-200">
+                    <div id="subproject-checklist" class="grid grid-cols-2 md:grid-cols-4 gap-3 p-4 bg-gray-50 rounded-lg mb-6 border border-gray-200">
                         ${subprojectChecklist}
                     </div>
         
@@ -443,7 +477,7 @@
                                         `).join('')}
                                     </select>
                                     <!-- Botón de Notas/Comentarios (usa el modal para esta vista) -->
-                                    <button onclick="openModal('${project.id}', '${sub.id}', '${sub.name}', ${JSON.stringify(comments).replace(/"/g, '&quot;')})"
+                                    <button onclick="openModal('comments-modal', '${project.id}', '${sub.id}', '${sub.name}', ${JSON.stringify(comments).replace(/"/g, '&quot;')})"
                                         class="text-blue-600 hover:text-blue-800 transition text-xs font-medium text-center">
                                         Notas (${comments.length})
                                     </button>
@@ -458,8 +492,18 @@
         
                 return `
                     <tr class="project-row">
-                        <td class="p-4 font-semibold text-gray-800 border-b border-gray-200 bg-gray-50 sticky-col-left-1">${project.code}</td>
-                        <td class="p-4 font-medium text-gray-700 border-b border-gray-200 bg-gray-50 sticky-col-left-2">${project.name}</td>
+                        <td class="p-2 text-sm font-semibold text-gray-800 border-b border-gray-200 bg-gray-50 sticky-col-left-1" style="min-width: 80px;">${project.code}</td>
+                        <td class="p-4 font-medium text-gray-700 border-b border-gray-200 bg-gray-50 sticky-col-left-2" style="min-width: 200px;">
+                            <div class="flex items-center justify-between">
+                                <span>${project.name}</span>
+                                <button onclick="openEditSubprojectsModal('${project.id}')" title="Editar subproyectos" 
+                                    class="text-blue-500 hover:text-blue-700 transition p-1 rounded-full hover:bg-blue-100">
+                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-7-9l5 5m-5-9l-5 5" />
+                                    </svg>
+                                </button>
+                            </div>
+                        </td>
                         ${subprojectCells}
                     </tr>
                 `;
@@ -470,7 +514,7 @@
                     <table class="min-w-full divide-y divide-gray-200">
                         <thead>
                             <tr>
-                                <th class="p-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider border-b-2 border-gray-200 sticky-col-left-1 bg-gray-50 z-20" style="min-width: 100px;">Código</th>
+                                <th class="p-2 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider border-b-2 border-gray-200 sticky-col-left-1 bg-gray-50 z-20" style="min-width: 80px;">Código</th>
                                 <th class="p-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider border-b-2 border-gray-200 sticky-col-left-2 bg-gray-50 z-20" style="min-width: 200px;">Nombre</th>
                                 ${subprojectHeaders}
                             </tr>
@@ -647,52 +691,57 @@
         }
         
         
-        // --- 7. Lógica del Modal (Usado en Tab 2 para Notas Rápidas) ---
+        // --- 7. Lógica de Modales (Comentarios y Edición) ---
         
-        const modalEl = document.getElementById('comments-modal');
-        const commentsListEl = document.getElementById('comments-list');
-        const modalSubprojectNameEl = document.getElementById('modal-subproject-name');
-        const commentInputEl = document.getElementById('comment-input');
-        const commentErrorEl = document.getElementById('comment-error');
-        
+        /**
+         * Función general para cerrar cualquier modal.
+         * @param {string} modalId - ID del modal a cerrar.
+         */
+        window.closeModal = (modalId) => {
+            const modalEl = document.getElementById(modalId);
+            if (modalEl) {
+                modalEl.classList.add('hidden');
+                modalEl.classList.remove('flex');
+            }
+            // Limpiar inputs específicos de los modales
+            if (modalId === 'comments-modal') {
+                document.getElementById('comment-input').value = '';
+                document.getElementById('comment-error').classList.add('hidden');
+            }
+            selectedProjectId = null;
+            selectedSubprojectId = null;
+        };
+
         /**
          * Abre el modal de comentarios (usado en la vista de Resumen).
          */
-        window.openModal = (projectId, subprojectId, subprojectName, commentsJsonString) => {
+        window.openModal = (modalId, projectId, subprojectId, subprojectName, commentsJsonString) => {
             selectedProjectId = projectId;
             selectedSubprojectId = subprojectId;
-            modalSubprojectNameEl.textContent = subprojectName;
+            document.getElementById('modal-subproject-name').textContent = subprojectName;
         
             let comments;
             try {
-                // Deserializar el JSON, reemplazando las entidades HTML &quot; por comillas dobles
                 comments = JSON.parse(commentsJsonString.replace(/&quot;/g, '"'));
             } catch (e) {
                 console.error("Error al parsear comentarios:", e);
                 comments = [];
             }
             
-            renderComments(comments); // Llama a la función de renderizado del modal
+            renderComments(comments); 
         
+            const modalEl = document.getElementById(modalId);
             modalEl.classList.remove('hidden');
             modalEl.classList.add('flex');
-            commentInputEl.focus();
+            document.getElementById('comment-input').focus();
         };
-        
-        /**
-         * Cierra el modal de comentarios.
-         */
-        window.closeModal = () => {
-            modalEl.classList.add('hidden');
-            modalEl.classList.remove('flex');
-            commentInputEl.value = '';
-            commentErrorEl.classList.add('hidden');
-        };
-        
+
         /**
          * Renderiza la lista de comentarios dentro del modal.
          */
         function renderComments(comments) {
+            const commentsListEl = document.getElementById('comments-list');
+            // ... (implementación de renderComments es la misma)
             commentsListEl.innerHTML = comments.length === 0
                 ? '<p class="text-gray-500 italic">Aún no hay notas. Sé el primero.</p>'
                 : comments.map(comment => {
@@ -711,24 +760,110 @@
                     `;
                 }).join('');
             
-            // Asegurar que el contenedor del modal existe antes de intentar hacer scroll
-            const modalContent = modalEl.querySelector('.custom-scroll');
+            const modalContent = document.getElementById('comments-modal').querySelector('.custom-scroll');
             if (modalContent) {
-                // Hacer scroll al fondo para ver la última nota
-                setTimeout(() => {
-                    modalContent.scrollTop = modalContent.scrollHeight;
-                }, 100); 
+                setTimeout(() => { modalContent.scrollTop = modalContent.scrollHeight; }, 100); 
             }
         }
         
-        // Permitir cerrar el modal haciendo click fuera
-        if (modalEl) {
-            modalEl.addEventListener('click', (e) => {
-                if (e.target === modalEl) {
-                    window.closeModal();
+        // --- 7.1. Lógica del Modal de Edición de Subproyectos ---
+
+        /**
+         * Abre el modal de edición de subproyectos.
+         */
+        window.openEditSubprojectsModal = (projectId) => {
+            selectedProjectId = projectId;
+            const project = projectsData.find(p => p.id === projectId);
+
+            if (!project) return;
+
+            document.getElementById('edit-modal-project-name').textContent = `${project.code} - ${project.name}`;
+            const checklistContainer = document.getElementById('edit-subproject-checklist');
+            
+            const currentSubprojectNames = project.subProjects.map(sp => sp.name);
+
+            checklistContainer.innerHTML = ALL_SUBPROJECT_OPTIONS.map(name => {
+                const isChecked = currentSubprojectNames.includes(name);
+                const id = `edit-sub-${name.replace(/\s/g, '-')}`;
+                return `
+                    <div class="flex items-center">
+                        <input id="${id}" type="checkbox" value="${name}" ${isChecked ? 'checked' : ''}
+                               class="h-4 w-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500 edit-subproject-checkbox">
+                        <label for="${id}" class="ml-2 text-sm font-medium text-gray-700">${name}</label>
+                    </div>
+                `;
+            }).join('');
+
+            const modalEl = document.getElementById('edit-modal');
+            modalEl.classList.remove('hidden');
+            modalEl.classList.add('flex');
+        };
+
+        /**
+         * Guarda los cambios de subproyectos editados.
+         */
+        window.saveEditedSubprojects = () => {
+            if (!selectedProjectId) return;
+
+            const project = projectsData.find(p => p.id === selectedProjectId);
+            if (!project) return;
+            
+            const selectedCheckboxes = document.querySelectorAll('#edit-subproject-checklist input.edit-subproject-checkbox:checked');
+            const newSubprojectNames = Array.from(selectedCheckboxes).map(cb => cb.value);
+            
+            if (newSubprojectNames.length === 0) {
+                alert("Un proyecto debe tener al menos un subproyecto. No se guardaron los cambios.");
+                return;
+            }
+
+            const updatedSubProjects = [];
+
+            // 1. Mantener subproyectos existentes y su estado/notas
+            project.subProjects.forEach(oldSub => {
+                if (newSubprojectNames.includes(oldSub.name)) {
+                    updatedSubProjects.push(oldSub);
+                }
+                // Si el subproyecto fue deseleccionado, se omite y se "elimina"
+            });
+
+            // 2. Añadir nuevos subproyectos con estado 'Pendiente'
+            const existingNames = updatedSubProjects.map(sp => sp.name);
+            newSubprojectNames.forEach(newName => {
+                if (!existingNames.includes(newName)) {
+                    updatedSubProjects.push({
+                        id: generateId(),
+                        name: newName,
+                        status: 0, // Pendiente
+                        comments: []
+                    });
                 }
             });
-        }
+
+            // Actualizar el proyecto en la lista global
+            const projectIndex = projectsData.findIndex(p => p.id === selectedProjectId);
+            if (projectIndex !== -1) {
+                projectsData[projectIndex].subProjects = updatedSubProjects;
+                saveProjects();
+                
+                closeModal('edit-modal');
+                // Forzar re-renderizado de la tabla resumen
+                renderTabContent();
+            }
+        };
+
+        
+        // Permitir cerrar los modales haciendo click fuera
+        const modals = ['comments-modal', 'edit-modal'];
+        modals.forEach(id => {
+            const modalEl = document.getElementById(id);
+            if (modalEl) {
+                modalEl.addEventListener('click', (e) => {
+                    if (e.target === modalEl) {
+                        window.closeModal(id);
+                    }
+                });
+            }
+        });
         
         // --- 8. Inicialización ---
         
