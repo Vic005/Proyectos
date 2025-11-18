@@ -6,7 +6,7 @@ import {
     addDoc, updateDoc, deleteDoc, doc, setLogLevel, getDocs
 } from 'firebase/firestore';
 import {
-    PencilIcon, TrashIcon, CheckCircleIcon, PlayIcon, StopIcon,
+    PencilIcon, TrashIcon, CheckCircleIcon, PlayIcon, Square, // <<-- CORREGIDO: Stop cambiado a Square
     PlusIcon, Loader2, List, Calendar, ChevronDown, ChevronUp
 } from 'lucide-react';
 
@@ -513,7 +513,7 @@ const TaskItem = ({ task, updateTask, deleteTask, startTimer, stopTimer, reorder
                     title={isRunning ? "Detener temporizador" : "Iniciar temporizador"}
                     disabled={task.isCompleted}
                 >
-                    {isRunning ? <StopIcon className="w-5 h-5" /> : <PlayIcon className="w-5 h-5" />}
+                    {isRunning ? <Square className="w-5 h-5" /> : <PlayIcon className="w-5 h-5" />} {/* <<-- CORREGIDO: Stop cambiado a Square */}
                 </button>
 
                 {/* Botones de Reordenar */}
