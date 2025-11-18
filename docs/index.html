@@ -1,62 +1,777 @@
-<?php
-/**
- * HANDLERS DE AJAX PARA EL GESTOR DE PROYECTOS REMOTO
- * Estas funciones se comunican con el JavaScript de la aplicación.
- */
-
-// 1. Manejador para Cargar los datos (pm_load_data)
-// Este hook responde a la acción 'pm_load_data' enviada desde JS (loadProjects)
-add_action('wp_ajax_pm_load_data', 'pm_handle_load_data');
-// También permite acceso a usuarios no logueados (opcional, pero no recomendado para datos internos)
-// add_action('wp_ajax_nopriv_pm_load_data', 'pm_handle_load_data'); 
-function pm_handle_load_data() {
-    // === SEGURIDAD BÁSICA: Solo permitir a usuarios logueados ===
-    if (!is_user_logged_in()) {
-        wp_send_json_error('No autorizado. Debes iniciar sesión en WordPress.');
-        wp_die();
-    }
-
-    // Obtener los datos almacenados bajo la opción 'project_manager_data'
-    // El '[]' es el valor por defecto si no existe la opción (primer uso)
-    $stored_data = get_option('project_manager_data', '[]');
-    
-    // Devolver una respuesta JSON con éxito y los datos (string JSON)
-    wp_send_json_success($stored_data);
-    
-    wp_die(); // Siempre terminar con wp_die() en AJAX handlers
-}
-
-
-// 2. Manejador para Guardar los datos (pm_save_data)
-// Este hook responde a la acción 'pm_save_data' enviada desde JS (saveProjects)
-add_action('wp_ajax_pm_save_data', 'pm_handle_save_data');
-// add_action('wp_ajax_nopriv_pm_save_data', 'pm_handle_save_data'); // No recomendado
-function pm_handle_save_data() {
-    // === SEGURIDAD BÁSICA: Solo permitir a usuarios logueados ===
-    if (!is_user_logged_in()) {
-        wp_send_json_error('No autorizado. Debes iniciar sesión en WordPress.');
-        wp_die();
-    }
-    
-    // Verificar si se enviaron los datos 'projects_data' en la petición POST
-    if (isset($_POST['projects_data'])) {
-        // Sanitizar el string JSON antes de guardarlo. 
-        // Se usa wp_unslash() para eliminar barras si se han añadido automáticamente.
-        $projects_data_json = sanitize_textarea_field(wp_unslash($_POST['projects_data']));
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gestor de Proyectos Remoto</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; background-color: #f7f9fb; }
+        .tab-button.active { border-color: #2563eb; color: #2563eb; background-color: #eff6ff; font-weight: 600; }
+        /* Estilos para los indicadores de estado */
+        .status-pill { padding: 4px 10px; border-radius: 9999px; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; }
+        .status-0 { background-color: #ffe0b2; color: #ff9800; } /* Pendiente */
+        .status-1 { background-color: #bbdefb; color: #2196f3; } /* Enviado/Ingresado */
+        .status-2 { background-color: #c8e6c9; color: #4caf50; } /* Realizado/Finalizado */
+        .status-3 { background-color: #ffcdd2; color: #f44336; } /* Observado */
+        .status-4 { background-color: #b2ebf2; color: #00bcd4; } /* Reingresado */
         
-        // Guardar el string JSON completo en la base de datos de WordPress
-        // 'yes' indica que se cargue automáticamente si es necesario (opcional)
-        $success = update_option('project_manager_data', $projects_data_json, 'yes');
+        /* Estilos de scrollbar personalizados */
+        .custom-scroll::-webkit-scrollbar { width: 6px; }
+        .custom-scroll::-webkit-scrollbar-thumb { background-color: #cbd5e1; border-radius: 3px; }
         
-        if ($success) {
-            wp_send_json_success('Datos guardados exitosamente.');
-        } else {
-            // Esto es común si los datos no cambiaron. No es necesariamente un error grave.
-            wp_send_json_error('Fallo al actualizar o no hubo cambios en la base de datos.');
+        .summary-cell { min-width: 150px; }
+        .project-row:hover { background-color: #f0f4f8; }
+        
+        /* Estilos específicos para la tabla resumen */
+        .sticky-col-left-1 {
+            position: sticky;
+            left: 0;
+            z-index: 10;
         }
-    } else {
-        wp_send_json_error('Datos de proyecto no recibidos.');
-    }
+        .sticky-col-left-2 {
+            position: sticky;
+            left: 100px; /* Ajustar según el ancho de la primera columna */
+            z-index: 10;
+        }
+        /* Color de fondo para las columnas pegajosas */
+        .sticky-col-left-1, .sticky-col-left-2 { background-color: #f7f9fb; }
+        .project-row:nth-child(even) .sticky-col-left-1, .project-row:nth-child(even) .sticky-col-left-2 { background-color: #f0f4f8; }
 
-    wp_die();
-}
+    </style>
+</head>
+<body class="p-4 md:p-8">
+
+    <header class="max-w-7xl mx-auto mb-8">
+        <h1 class="text-3xl md:text-4xl font-bold text-gray-800 mb-2">Proyectos Actuales (Modo Remoto)</h1>
+        <p class="text-gray-500">Los datos se guardan centralmente en la base de datos de WordPress.</p>
+    </header>
+    
+    <div class="max-w-7xl mx-auto bg-white rounded-t-xl shadow-md border-b border-gray-200">
+        <div class="flex border-b border-gray-200">
+            <button id="tab-input" onclick="changeTab('input')" class="tab-button active p-4 text-gray-600 border-b-2 border-transparent hover:border-blue-500 transition duration-150">
+                1. Ingreso de Proyecto
+            </button>
+            <button id="tab-summary" onclick="changeTab('summary')" class="tab-button p-4 text-gray-600 border-b-2 border-transparent hover:border-blue-500 transition duration-150">
+                2. Tabla Resumen
+            </button>
+            <button id="tab-detail" onclick="changeTab('detail')" class="tab-button p-4 text-gray-600 border-b-2 border-transparent hover:border-blue-500 transition duration-150">
+                3. Detalle y Notas
+            </button>
+        </div>
+    </div>
+    
+    <main id="tab-content-container" class="max-w-7xl mx-auto bg-white p-6 rounded-b-xl shadow-md border-t-0 border-gray-200">
+        <div id="loading-indicator" class="p-8 text-center text-blue-500 font-semibold hidden">Cargando proyectos...</div>
+    </main>
+    
+    <div id="comments-modal" class="fixed inset-0 bg-gray-900 bg-opacity-75 hidden items-center justify-center p-4 z-50">
+        <div class="bg-white rounded-xl shadow-2xl w-full max-w-xl max-h-[90vh] flex flex-col">
+            <header class="p-6 border-b border-gray-200 flex justify-between items-center">
+                <h3 class="text-xl font-semibold text-gray-800">Notas para: <span id="modal-subproject-name" class="text-blue-600"></span></h3>
+                <button onclick="closeModal()" class="text-gray-400 hover:text-gray-600 transition">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                </button>
+            </header>
+
+            <div class="p-6 flex-grow custom-scroll overflow-y-auto">
+                <div id="comments-list" class="space-y-4">
+                    </div>
+            </div>
+
+            <footer class="p-6 border-t border-gray-200">
+                <textarea id="comment-input" placeholder="Añadir una nueva nota..."
+                          class="w-full p-3 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500 mb-3 resize-none"></textarea>
+                <button onclick="addComment()" id="add-comment-btn"
+                        class="w-full bg-green-600 text-white p-3 rounded-lg font-semibold hover:bg-green-700 transition duration-150">
+                    Guardar Nota
+                </button>
+                <p id="comment-error" class="text-red-500 text-sm mt-2 hidden">La nota no puede estar vacía.</p>
+            </footer>
+        </div>
+    </div>
+
+
+    <script>
+        // --- 1. Datos Maestros ---
+        // URL de AJAX de WordPress para la comunicación con el servidor
+        const PROJECT_AJAX_URL = '/wp-admin/admin-ajax.php'; 
+        
+        const STATUSES = [
+            { name: "Pendiente", class: "status-0" },
+            { name: "Ingresado", class: "status-1" },
+            { name: "Realizado", class: "status-2" },
+            { name: "Observado", class: "status-3" },
+            { name: "Reingresado", class: "status-4" },
+            { name: "Pendiente", class: "status-5" }
+        ];
+        
+        // Lista completa de posibles subproyectos (usados para los encabezados de la tabla resumen)
+        const ALL_SUBPROJECT_OPTIONS = [
+            "Mediciones",
+            "Paradero",
+            "Justificaciones",
+            "Reprogramación",
+            "IMIV Básico",
+            "SYD",
+            "Ciclovía",
+            "Oros"
+        ];
+
+        // --- 2. Estado de la Aplicación (Local) ---
+        let projectsData = []; // Cache para datos de proyectos
+        let currentTab = 'input'; 
+        let currentDetailProject = null; // Proyecto seleccionado en Tab 3
+        let selectedProjectId = null;
+        let selectedSubprojectId = null;
+        
+        // --- 3. Funciones de Persistencia (AJAX/PHP) ---
+
+        /**
+         * Carga los datos de proyectos desde la base de datos de WordPress.
+         */
+        async function loadProjects() {
+            document.getElementById('loading-indicator').classList.remove('hidden');
+            try {
+                const formData = new FormData();
+                formData.append('action', 'pm_load_data'); // Hook de PHP para cargar
+
+                const response = await fetch(PROJECT_AJAX_URL, {
+                    method: 'POST',
+                    body: formData
+                });
+                const result = await response.json();
+                
+                if (result.success && result.data) {
+                    // El resultado.data es un string JSON que debe ser parseado
+                    projectsData = JSON.parse(result.data) || [];
+                } else {
+                     // Si no hay datos o falla, inicializa vacío
+                    projectsData = [];
+                }
+                
+                // Intentar seleccionar el primer proyecto para la vista de detalle
+                if (projectsData.length > 0 && !currentDetailProject) {
+                    currentDetailProject = projectsData[0];
+                }
+
+            } catch (e) {
+                console.error("Error al cargar datos desde el servidor:", e);
+                alert("Error de conexión al servidor. No se pudieron cargar los proyectos.");
+                projectsData = [];
+            } finally {
+                document.getElementById('loading-indicator').classList.add('hidden');
+            }
+        }
+
+        /**
+         * Guarda el estado actual de los proyectos en la base de datos de WordPress.
+         */
+        async function saveProjects() {
+            try {
+                // Serializamos todo el array de datos (estrategia Cargar-Todo, Guardar-Todo)
+                const projectsJson = JSON.stringify(projectsData);
+                
+                const formData = new FormData();
+                formData.append('action', 'pm_save_data'); // Hook de PHP para guardar
+                formData.append('projects_data', projectsJson); // Los datos JSON a guardar
+                
+                const response = await fetch(PROJECT_AJAX_URL, {
+                    method: 'POST',
+                    body: formData
+                });
+                const result = await response.json();
+                
+                if (!result.success) {
+                    console.error("Error al guardar datos:", result.data);
+                    alert("Error al guardar en el servidor. Consulta con el administrador.");
+                } else {
+                    console.log("Datos guardados en el servidor con éxito.");
+                }
+
+            } catch (e) {
+                console.error("Error de comunicación al guardar:", e);
+                alert("Fallo la conexión al servidor de WordPress. Datos no guardados.");
+            }
+        }
+
+        // --- 4. Funciones de Creación (Tab 1) ---
+        
+        /**
+         * Genera un ID simple (simulando un UUID)
+         */
+        function generateId() {
+            return Date.now().toString(36) + Math.random().toString(36).substring(2);
+        }
+
+        /**
+         * Crea un nuevo proyecto en la memoria local y lo guarda en el servidor.
+         */
+        window.createProject = async () => {
+            const projectName = document.getElementById('input-project-name').value.trim();
+            const projectCode = document.getElementById('input-project-code').value.trim();
+            const checkboxes = document.querySelectorAll('#subproject-checklist input:checked');
+        
+            if (!projectName || !projectCode) {
+                alert("Por favor, ingresa el Nombre y el Código del proyecto.");
+                return;
+            }
+            if (checkboxes.length === 0) {
+                 alert("Por favor, selecciona al menos un subproyecto.");
+                return;
+            }
+        
+            // Mapear los subproyectos seleccionados con estado inicial "Pendiente" (índice 0)
+            const subProjects = Array.from(checkboxes).map(checkbox => ({
+                id: generateId(),
+                name: checkbox.value,
+                status: 0, // 0 = Pendiente
+                comments: []
+            }));
+        
+            const newProject = {
+                id: generateId(),
+                name: projectName,
+                code: projectCode.toUpperCase(),
+                createdAt: new Date().toISOString(),
+                subProjects: subProjects,
+            };
+        
+            projectsData.push(newProject);
+            
+            // *** CAMBIO CLAVE: Llama a saveProjects() para persistir ***
+            await saveProjects();
+        
+            // Limpiar formulario y cambiar a pestaña de resumen
+            document.getElementById('input-project-name').value = '';
+            document.getElementById('input-project-code').value = '';
+            checkboxes.forEach(cb => cb.checked = false);
+            
+            // Si es el primer proyecto, establecerlo como proyecto de detalle
+            if (projectsData.length === 1) {
+                currentDetailProject = newProject;
+            }
+
+            window.changeTab('summary');
+        };
+        
+        
+        // --- 5. Funciones de Actualización de Datos (Compartido por Tab 2 y Tab 3) ---
+        
+        /**
+         * Busca un subproyecto y lo actualiza localmente. 
+         * Luego llama a saveProjects para persistir en el servidor.
+         */
+        function updateSubproject(projectId, subprojectId, updates) {
+            const project = projectsData.find(p => p.id === projectId);
+        
+            if (project) {
+                const subProjectIndex = project.subProjects.findIndex(sp => sp.id === subprojectId);
+        
+                if (subProjectIndex !== -1) {
+                    const subProject = project.subProjects[subProjectIndex];
+                    project.subProjects[subProjectIndex] = { ...subProject, ...updates };
+                    
+                    // *** CAMBIO CLAVE: Persistir después de la actualización local ***
+                    saveProjects(); 
+                    
+                    // Refrescar la UI
+                    renderTabContent();
+                }
+            }
+        }
+
+        /**
+         * Actualiza el estado de un subproyecto.
+         */
+        window.updateSubprojectStatus = (projectId, subprojectId, newStatus) => {
+            updateSubproject(projectId, subprojectId, { status: newStatus });
+        };
+        
+        /**
+         * Añade un comentario (nota) al subproyecto seleccionado.
+         */
+        window.addComment = async () => {
+            if (!selectedProjectId || !selectedSubprojectId) return;
+        
+            // Determinar si el comentario viene del modal (Tab 2) o del detalle (Tab 3)
+            const isDetailTab = currentTab === 'detail';
+            const inputEl = document.getElementById(isDetailTab ? 'detail-comment-input' : 'comment-input');
+            const errorEl = document.getElementById(isDetailTab ? 'detail-comment-error' : 'comment-error');
+            
+            const commentText = inputEl.value.trim();
+        
+            if (!commentText) {
+                if(errorEl) errorEl.classList.remove('hidden');
+                return;
+            }
+            if(errorEl) errorEl.classList.add('hidden');
+            
+            const newComment = {
+                text: commentText,
+                timestamp: new Date().toISOString(),
+                // En modo remoto sin login, usamos un ID genérico, asumiendo la autenticación
+                // se hizo al ingresar a WordPress. Si se requiere autor, este valor debe
+                // ser reemplazado por el nombre del usuario logueado de WP.
+                authorId: 'MiembroEquipo' 
+            };
+        
+            const project = projectsData.find(p => p.id === selectedProjectId);
+            const subProjectIndex = project.subProjects.findIndex(sp => sp.id === selectedSubprojectId);
+        
+            if (subProjectIndex !== -1) {
+                const subProject = project.subProjects[subProjectIndex];
+                const updatedComments = [...(subProject.comments || []), newComment];
+                
+                // Actualizar localmente y persistir
+                updateSubproject(selectedProjectId, selectedSubprojectId, { comments: updatedComments });
+                
+                inputEl.value = '';
+                console.log("Nota añadida con éxito.");
+
+                // Si estamos en el modal de Tab 2, re-renderizar solo las notas del modal
+                if (!isDetailTab) {
+                     // Esperamos un momento para que el saveProjects se ejecute 
+                     // aunque la actualización local ya refrescó los datos.
+                     renderComments(updatedComments);
+                } else {
+                    // Si estamos en Tab 3, el renderTabContent() se encarga
+                }
+            }
+        };
+
+        // Función auxiliar para Tab 3, llama a la función central de añadir comentario.
+        window.addCommentFromDetail = window.addComment;
+        
+        // --- 6. Lógica de Navegación y Renderizado de Pestañas ---
+        
+        const tabContentContainerEl = document.getElementById('tab-content-container');
+        
+        /**
+         * Cambia la pestaña activa y actualiza el contenido.
+         */
+        window.changeTab = (tabName) => {
+            currentTab = tabName;
+            document.querySelectorAll('.tab-button').forEach(btn => {
+                btn.classList.remove('active');
+                if (btn.id === `tab-${tabName}`) {
+                    btn.classList.add('active');
+                }
+            });
+            renderTabContent();
+        };
+        
+        /**
+         * Renderiza el contenido específico de la pestaña activa.
+         */
+        function renderTabContent() {
+            let html = '';
+            
+            if (projectsData.length === 0 && currentTab !== 'input') {
+                html = '<div class="p-8 text-center text-gray-500">No hay proyectos creados. Ve a la pestaña "1. Ingreso de Proyecto" para empezar.</div>';
+            } else {
+                switch (currentTab) {
+                    case 'input':
+                        html = renderInputTab();
+                        break;
+                    case 'summary':
+                        html = renderSummaryTab();
+                        break;
+                    case 'detail':
+                        // Asegurarse de que haya un proyecto seleccionado al entrar en la vista de detalle
+                        if (!currentDetailProject && projectsData.length > 0) {
+                             currentDetailProject = projectsData[0];
+                        }
+                        // Validar si el proyecto aún existe
+                        if (currentDetailProject && !projectsData.find(p => p.id === currentDetailProject.id)) {
+                             currentDetailProject = projectsData.length > 0 ? projectsData[0] : null;
+                             selectedSubprojectId = null;
+                        }
+                        html = renderDetailTab();
+                        break;
+                }
+            }
+        
+            tabContentContainerEl.innerHTML = html;
+        
+            // Lógica post-renderizado para Tab 3 (Detalle)
+            if (currentTab === 'detail' && currentDetailProject) {
+                // Re-renderizar la lista de subproyectos (Columna 2)
+                renderDetailSubprojects(currentDetailProject.id);
+                
+                // Si hay un subproyecto seleccionado, asegurar que se muestre su detalle
+                if (selectedSubprojectId) {
+                    const project = projectsData.find(p => p.id === currentDetailProject.id);
+                    const subproject = project.subProjects.find(s => s.id === selectedSubprojectId);
+                    
+                    if (subproject) {
+                        const notesSection = document.getElementById('detail-notes-section');
+                        if(notesSection) notesSection.classList.remove('hidden');
+                        renderDetailSubproject(currentDetailProject.id, subproject);
+                    }
+                } else {
+                    const notesSection = document.getElementById('detail-notes-section');
+                    if(notesSection) notesSection.classList.add('hidden');
+                }
+            }
+        }
+        
+        // --- 6.1. Tab 1: Ingreso de Proyecto ---
+        
+        function renderInputTab() {
+            const subprojectChecklist = ALL_SUBPROJECT_OPTIONS.map(name => `
+                <div class="flex items-center">
+                    <input id="sub-${name.replace(/\s/g, '-')}" type="checkbox" value="${name}" 
+                           class="h-4 w-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500">
+                    <label for="sub-${name.replace(/\s/g, '-')}" class="ml-2 text-sm font-medium text-gray-700">${name}</label>
+                </div>
+            `).join('');
+        
+            return `
+                <div>
+                    <h2 class="text-xl font-semibold text-gray-700 mb-4">Ingresar Nuevo Proyecto</h2>
+                    
+                    <div class="grid md:grid-cols-2 gap-4 mb-4">
+                        <input type="text" id="input-project-name" placeholder="Nombre del Proyecto (e.g., Proyecto Urbano B-1)"
+                            class="p-3 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500">
+                            
+                        <input type="text" id="input-project-code" placeholder="Código (e.g., PRO-001)"
+                            class="p-3 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500 uppercase">
+                    </div>
+        
+                    <h3 class="font-medium text-gray-700 mb-2">Seleccionar Subproyectos Requeridos:</h3>
+                    <div id="subproject-checklist" class="grid grid-cols-2 md:grid-cols-3 gap-3 p-4 bg-gray-50 rounded-lg mb-6 border border-gray-200">
+                        ${subprojectChecklist}
+                    </div>
+        
+                    <button onclick="createProject()"
+                            class="w-full bg-blue-600 text-white p-3 rounded-lg font-semibold hover:bg-blue-700 transition duration-150">
+                        Guardar Proyecto
+                    </button>
+                </div>
+            `;
+        }
+        
+        // --- 6.2. Tab 2: Tabla Resumen ---
+        
+        function renderSummaryTab() {
+            if (projectsData.length === 0) return '';
+            
+            // 1. Generar encabezados dinámicos
+            const subprojectHeaders = ALL_SUBPROJECT_OPTIONS.map(name => `
+                <th class="summary-cell p-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider border-b-2 border-gray-200">${name}</th>
+            `).join('');
+        
+            // 2. Generar filas de proyectos
+            const projectRows = projectsData.map(project => {
+                const subprojectCells = ALL_SUBPROJECT_OPTIONS.map(subName => {
+                    const sub = project.subProjects.find(s => s.name === subName);
+                    
+                    if (sub) {
+                        // Asegurar que comments sea un array para JSON.stringify
+                        const comments = Array.isArray(sub.comments) ? sub.comments : [];
+                        
+                        // Encontrar el estado actual para preseleccionar en el dropdown
+                        const currentStatusIndex = sub.status;
+
+                        return `
+                            <td class="summary-cell p-4 whitespace-nowrap border-b border-gray-200 bg-white">
+                                <div class="flex flex-col space-y-2">
+                                    <select onchange="updateSubprojectStatus('${project.id}', '${sub.id}', parseInt(this.value))"
+                                            class="p-2 border border-gray-300 rounded-lg text-sm w-full focus:ring-blue-500 focus:border-blue-500 bg-white">
+                                        ${STATUSES.map((s, index) => `
+                                            <option value="${index}" ${currentStatusIndex === index ? 'selected' : ''}>${s.name}</option>
+                                        `).join('')}
+                                    </select>
+                                    <button onclick="openModal('${project.id}', '${sub.id}', '${sub.name}', ${JSON.stringify(comments).replace(/"/g, '&quot;')})"
+                                        class="text-blue-600 hover:text-blue-800 transition text-xs font-medium text-center">
+                                        Notas (${comments.length})
+                                    </button>
+                                </div>
+                            </td>
+                        `;
+                    } else {
+                        // Subproyecto no seleccionado para este proyecto
+                        return `<td class="summary-cell p-4 whitespace-nowrap border-b border-gray-200 text-center text-gray-300">N/A</td>`;
+                    }
+                }).join('');
+        
+                return `
+                    <tr class="project-row">
+                        <td class="p-4 font-semibold text-gray-800 border-b border-gray-200 bg-gray-50 sticky-col-left-1">${project.code}</td>
+                        <td class="p-4 font-medium text-gray-700 border-b border-gray-200 bg-gray-50 sticky-col-left-2">${project.name}</td>
+                        ${subprojectCells}
+                    </tr>
+                `;
+            }).join('');
+            
+            return `
+                <div class="overflow-x-auto custom-scroll">
+                    <table class="min-w-full divide-y divide-gray-200">
+                        <thead>
+                            <tr>
+                                <th class="p-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider border-b-2 border-gray-200 sticky-col-left-1 bg-gray-50 z-20" style="min-width: 100px;">Código</th>
+                                <th class="p-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider border-b-2 border-gray-200 sticky-col-left-2 bg-gray-50 z-20" style="min-width: 200px;">Nombre</th>
+                                ${subprojectHeaders}
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-gray-200">
+                            ${projectRows}
+                        </tbody>
+                    </table>
+                </div>
+            `;
+        }
+        
+        // --- 6.3. Tab 3: Detalle y Notas ---
+        
+        function renderProjectListDetail() {
+            return projectsData.map(project => `
+                <li onclick="selectDetailProject('${project.id}')" 
+                    class="p-3 cursor-pointer hover:bg-gray-100 transition rounded-lg ${currentDetailProject && currentDetailProject.id === project.id ? 'bg-blue-50 font-semibold text-blue-700' : 'text-gray-700'}">
+                    ${project.code} - ${project.name}
+                </li>
+            `).join('');
+        }
+        
+        function renderDetailTab() {
+            // Manejar caso sin proyectos
+            if (projectsData.length === 0) {
+                 return '<div class="p-8 text-center text-gray-500">No hay proyectos creados. Ve a la pestaña "1. Ingreso de Proyecto" para empezar.</div>';
+            }
+            
+            // Si currentDetailProject es nulo, seleccionar el primero
+            if (!currentDetailProject && projectsData.length > 0) {
+                currentDetailProject = projectsData[0];
+            }
+            
+            const projectName = currentDetailProject ? currentDetailProject.name : 'Selecciona un proyecto';
+            
+            return `
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-6 h-full min-h-[500px]">
+                    <div class="md:col-span-1 bg-gray-50 p-4 rounded-xl border border-gray-200 overflow-y-auto custom-scroll">
+                        <h3 class="text-lg font-bold mb-3 text-gray-700">Seleccionar Proyecto:</h3>
+                        <ul id="project-list-detail" class="space-y-1">
+                            ${renderProjectListDetail()}
+                        </ul>
+                    </div>
+        
+                    <div class="md:col-span-2 flex flex-col space-y-4">
+                        <div class="bg-white p-4 rounded-xl border border-gray-200">
+                            <h3 class="text-lg font-bold mb-3 text-gray-700">Subproyectos de: <span class="text-blue-600">${projectName}</span></h3>
+                            <div id="subprojects-detail-list" class="space-y-2">
+                                ${currentDetailProject ? '<p class="text-gray-500">Selecciona un subproyecto para ver las notas.</p>' : 'Selecciona un proyecto de la lista de la izquierda.'}
+                            </div>
+                        </div>
+        
+                        <div id="detail-notes-section" class="bg-white p-4 rounded-xl border border-gray-200 flex-grow hidden">
+                            <h4 class="text-lg font-bold mb-3 text-gray-700">Notas para: <span id="detail-subproject-title" class="text-green-600"></span></h4>
+                            <div class="h-4/5 flex flex-col">
+                                <div id="detail-notes-list" class="flex-grow overflow-y-auto custom-scroll space-y-3 mb-4 p-2 border rounded-lg bg-gray-50">
+                                    </div>
+                                
+                                <textarea id="detail-comment-input" placeholder="Añadir una nueva nota..."
+                                    class="w-full p-3 border border-gray-300 rounded-lg focus:ring-green-500 focus:border-green-500 mb-2 resize-none"></textarea>
+                                <button onclick="addCommentFromDetail()"
+                                    class="w-full bg-green-600 text-white p-3 rounded-lg font-semibold hover:bg-green-700 transition duration-150">
+                                    Guardar Nota
+                                </button>
+                                <p id="detail-comment-error" class="text-red-500 text-sm mt-2 hidden">La nota no puede estar vacía.</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+        
+        /**
+         * Selecciona un proyecto en la vista de Detalle (Tab 3).
+         */
+        window.selectDetailProject = (projectId) => {
+            currentDetailProject = projectsData.find(p => p.id === projectId);
+            selectedSubprojectId = null; // Resetear la selección del subproyecto
+            
+            renderTabContent(); // Re-renderizar para actualizar la UI
+        };
+        
+        /**
+         * Renderiza los subproyectos de un proyecto seleccionado en Tab 3.
+         */
+        function renderDetailSubprojects(projectId) {
+            const project = projectsData.find(p => p.id === projectId);
+            const listEl = document.getElementById('subprojects-detail-list');
+            
+            if (!project || !listEl) return;
+            
+            const subprojectsHtml = project.subProjects.map(sub => {
+                const status = STATUSES[sub.status] || STATUSES[0];
+                return `
+                    <div onclick="selectDetailSubproject('${project.id}', '${sub.id}')"
+                         class="flex justify-between items-center p-3 border rounded-lg cursor-pointer hover:bg-blue-50 transition ${sub.id === selectedSubprojectId ? 'bg-blue-100 border-blue-400' : 'bg-white border-gray-200'}">
+                        <span class="font-medium text-gray-700">${sub.name} (${(sub.comments || []).length} Notas)</span>
+                        <span class="status-pill ${status.class}">${status.name}</span>
+                    </div>
+                `;
+            }).join('');
+            
+            listEl.innerHTML = subprojectsHtml;
+        }
+        
+        /**
+         * Selecciona un subproyecto para ver sus notas en Tab 3.
+         */
+        window.selectDetailSubproject = (projectId, subprojectId) => {
+            selectedProjectId = projectId;
+            selectedSubprojectId = subprojectId;
+            
+            const project = projectsData.find(p => p.id === projectId);
+            const subproject = project.subProjects.find(s => s.id === selectedSubprojectId);
+        
+            if (subproject) {
+                const titleEl = document.getElementById('detail-subproject-title');
+                if (titleEl) title дело.textContent = subproject.name;
+                
+                const notesSection = document.getElementById('detail-notes-section');
+                if(notesSection) notesSection.classList.remove('hidden');
+                
+                renderDetailSubprojects(projectId); // Para marcar el subproyecto seleccionado
+                renderDetailSubproject(projectId, subproject); // Renderizar las notas y el formulario
+            }
+        };
+        
+        /**
+         * Renderiza el contenido de notas para el subproyecto seleccionado en Tab 3.
+         */
+        function renderDetailSubproject(projectId, subproject) {
+            selectedProjectId = projectId;
+            selectedSubprojectId = subproject.id;
+            
+            const commentsListElDetail = document.getElementById('detail-notes-list');
+            const comments = subproject.comments || [];
+            
+            if (!commentsListElDetail) return;
+            
+             commentsListElDetail.innerHTML = comments.length === 0
+                ? '<p class="text-center text-gray-400 italic mt-4">Aún no hay notas para este subproyecto.</p>'
+                : comments.map(comment => {
+                    const date = new Date(comment.timestamp);
+                    const formattedDate = date.toLocaleDateString('es-ES', { day: '2-digit', month: 'short' }) + ' ' +
+                                          date.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
+        
+                    return `
+                        <div class="bg-white p-3 rounded-lg border border-gray-200 shadow-sm">
+                            <p class="text-gray-700 mb-1">${comment.text}</p>
+                            <p class="text-xs text-gray-500 flex justify-between">
+                                <span>Autor: ${comment.authorId}</span>
+                                <span>${formattedDate}</span>
+                            </p>
+                        </div>
+                    `;
+                }).join('');
+                
+            commentsListElDetail.scrollTop = commentsListElDetail.scrollHeight;
+        }
+        
+        
+        // --- 7. Lógica del Modal (Usado en Tab 2 para Notas Rápidas) ---
+        
+        const modalEl = document.getElementById('comments-modal');
+        const commentsListEl = document.getElementById('comments-list');
+        const modalSubprojectNameEl = document.getElementById('modal-subproject-name');
+        const commentInputEl = document.getElementById('comment-input');
+        const commentErrorEl = document.getElementById('comment-error');
+        
+        /**
+         * Abre el modal de comentarios (usado en la vista de Resumen).
+         */
+        window.openModal = (projectId, subprojectId, subprojectName, commentsJsonString) => {
+            selectedProjectId = projectId;
+            selectedSubprojectId = subprojectId;
+            modalSubprojectNameEl.textContent = subprojectName;
+        
+            let comments;
+            try {
+                // Deserializar el JSON, reemplazando las entidades HTML &quot; por comillas dobles
+                comments = JSON.parse(commentsJsonString.replace(/&quot;/g, '"'));
+            } catch (e) {
+                console.error("Error al parsear comentarios:", e);
+                comments = [];
+            }
+            
+            renderComments(comments); // Llama a la función de renderizado del modal
+        
+            modalEl.classList.remove('hidden');
+            modalEl.classList.add('flex');
+            commentInputEl.focus();
+        };
+        
+        /**
+         * Cierra el modal de comentarios.
+         */
+        window.closeModal = () => {
+            modalEl.classList.add('hidden');
+            modalEl.classList.remove('flex');
+            commentInputEl.value = '';
+            commentErrorEl.classList.add('hidden');
+        };
+        
+        /**
+         * Renderiza la lista de comentarios dentro del modal.
+         */
+        function renderComments(comments) {
+            commentsListEl.innerHTML = comments.length === 0
+                ? '<p class="text-gray-500 italic">Aún no hay notas. Sé el primero.</p>'
+                : comments.map(comment => {
+                    const date = new Date(comment.timestamp);
+                    const formattedDate = date.toLocaleDateString('es-ES', { day: '2-digit', month: 'short' }) + ' ' +
+                                          date.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
+        
+                    return `
+                        <div class="bg-gray-50 p-4 rounded-lg border border-gray-200">
+                            <p class="text-gray-700 mb-2">${comment.text}</p>
+                            <p class="text-xs text-gray-500 flex justify-between">
+                                <span>Autor: ${comment.authorId}</span>
+                                <span>${formattedDate}</span>
+                            </p>
+                        </div>
+                    `;
+                }).join('');
+            
+            // Asegurar que el contenedor del modal existe antes de intentar hacer scroll
+            const modalContent = modalEl.querySelector('.custom-scroll');
+            if (modalContent) {
+                // Hacer scroll al fondo para ver la última nota
+                setTimeout(() => {
+                    modalContent.scrollTop = modalContent.scrollHeight;
+                }, 100); 
+            }
+        }
+        
+        // Permitir cerrar el modal haciendo click fuera
+        if (modalEl) {
+            modalEl.addEventListener('click', (e) => {
+                if (e.target === modalEl) {
+                    window.closeModal();
+                }
+            });
+        }
+        
+        // --- 8. Inicialización ---
+        
+        /**
+         * Inicia la aplicación al cargar la página.
+         */
+        async function initializeApp() {
+            // Cargar los datos del servidor (ahora es asíncrono)
+            await loadProjects(); 
+            // Renderizar el contenido una vez que los datos estén cargados
+            renderTabContent();
+        }
+
+        document.addEventListener('DOMContentLoaded', initializeApp);
+    </script>
+    </body>
+</html>
