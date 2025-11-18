@@ -46,8 +46,8 @@
 <body class="p-4 md:p-8">
 
     <header class="max-w-7xl mx-auto mb-8">
-        <h1 class="text-3xl md:text-4xl font-bold text-gray-800 mb-2">Gestor de Proyectos (Modo Local)</h1>
-        <p class="text-gray-500">Los datos se guardan en el navegador (LocalStorage).</p>
+        <h1 class="text-3xl md:text-4xl font-bold text-gray-800 mb-2">Proyectos Actuales</h1>
+        <p class="text-gray-500">Los datos se guardan en el navegador.</p>
     </header>
     
     <!-- Controles de Pestañas -->
@@ -108,20 +108,23 @@
         
         const STATUSES = [
             { name: "Pendiente", class: "status-0" },
-            { name: "Enviado", class: "status-1" },
+            { name: "Ingresado", class: "status-1" },
             { name: "Realizado", class: "status-2" },
             { name: "Observado", class: "status-3" },
-            { name: "Reingresado", class: "status-4" }
+            { name: "Reingresado", class: "status-4" },
+            { name: "Pendiente", class: "status-5" }
         ];
         
         // Lista completa de posibles subproyectos (usados para los encabezados de la tabla resumen)
         const ALL_SUBPROJECT_OPTIONS = [
+            "Mediciones",
             "Paradero",
             "Justificaciones",
-            "Estudios Preliminares",
-            "Diseño Final",
-            "Presupuesto y Adquisiciones",
-            "Instalación y Pruebas"
+            "Reprogramación",
+            "IMIV Básico",
+            "SYD",
+            "Ciclovía",
+            "Oros"
         ];
 
         // --- 2. Estado de la Aplicación (Local) ---
