@@ -486,7 +486,7 @@
                                             <option value="${index}" ${currentStatusIndex === index ? 'selected' : ''}>${s.name}</option>
                                         `).join('')}
                                     </select>
-                                    <button onclick="openModal('${project.id}', '${sub.id}', '${sub.name}', ${JSON.stringify(comments).replace(/"/g, '&quot;')})"
+                                    <button onclick="openModal('${project.id}', '${sub.id}', '${sub.name}', '${JSON.stringify(comments).replace(/"/g, '&quot;')}')"
                                         class="text-blue-600 hover:text-blue-800 transition text-xs font-medium text-center">
                                         Notas (${comments.length})
                                     </button>
@@ -632,7 +632,8 @@
         
             if (subproject) {
                 const titleEl = document.getElementById('detail-subproject-title');
-                if (titleEl) title дело.textContent = subproject.name;
+                // *** LÍNEA CORREGIDA ***
+                if (titleEl) titleEl.textContent = subproject.name;
                 
                 const notesSection = document.getElementById('detail-notes-section');
                 if(notesSection) notesSection.classList.remove('hidden');
