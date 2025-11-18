@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Gestor de Proyectos (Tiempo Real)</title>
+    <title>Gestor de Proyectos (Diagnóstico de Conexión)</title>
     <!-- Carga de Tailwind CSS para el diseño -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- Fuente Inter -->
@@ -29,17 +29,8 @@
         .project-row:hover { background-color: #f0f4f8; }
         
         /* Estilos específicos para las columnas pegajosas */
-        .sticky-col-left-1 {
-            position: sticky;
-            left: 0;
-            z-index: 10;
-        }
-        .sticky-col-left-2 {
-            position: sticky;
-            left: 80px; 
-            z-index: 10;
-        }
-        /* Color de fondo para las columnas pegajosas */
+        .sticky-col-left-1 { position: sticky; left: 0; z-index: 10; }
+        .sticky-col-left-2 { position: sticky; left: 80px; z-index: 10; }
         .sticky-col-left-1, .sticky-col-left-2 { background-color: #f7f9fb; }
         .project-row:nth-child(even) .sticky-col-left-1, .project-row:nth-child(even) .sticky-col-left-2 { background-color: #f0f4f8; }
 
@@ -48,9 +39,16 @@
 <body class="p-4 md:p-8">
 
     <header class="max-w-7xl mx-auto mb-8">
-        <h1 class="text-3xl md:text-4xl font-bold text-gray-800 mb-2">Gestor de Proyectos <span class="text-green-600">(Tiempo Real)</span></h1>
-        <p class="text-gray-500">Los datos se sincronizan al instante para todos los usuarios. Funciona como un "Excel Compartido".</p>
-        <p id="auth-status" class="text-sm font-medium mt-2 p-2 bg-blue-100 text-blue-800 rounded-lg">Cargando conexión...</p>
+        <h1 class="text-3xl md:text-4xl font-bold text-gray-800 mb-2">Gestor de Proyectos <span class="text-green-600">(Diagnóstico)</span></h1>
+        <p class="text-gray-500">Estado de la conexión a la base de datos en tiempo real.</p>
+        
+        <!-- PANEL DE DIAGNÓSTICO MEJORADO -->
+        <div id="auth-status-container" class="mt-4 p-4 rounded-xl shadow-lg border">
+            <h2 class="font-bold text-lg mb-2 text-gray-700">Estado de Conexión (FIREBASE)</h2>
+            <div id="auth-status" class="text-sm font-medium text-gray-800 space-y-1">
+                <p class="text-blue-600">Iniciando chequeo...</p>
+            </div>
+        </div>
     </header>
     
     <!-- Contenido Principal Dinámico -->
@@ -73,9 +71,9 @@
         <!-- El contenido de la pestaña se inyectará aquí -->
     </main>
     
-    <!-- Modales (Mantenidos) -->
+    <!-- MODALES (Omitidos por brevedad, el usuario ya los tiene) -->
     
-    <!-- Modal de Comentarios (Usado en la vista de Resumen) -->
+    <!-- Modal de Comentarios -->
     <div id="comments-modal" class="fixed inset-0 bg-gray-900 bg-opacity-75 hidden items-center justify-center p-4 z-50">
         <div class="bg-white rounded-xl shadow-2xl w-full max-w-xl max-h-[90vh] flex flex-col">
             <header class="p-6 border-b border-gray-200 flex justify-between items-center">
@@ -154,17 +152,18 @@
         // Importar las bibliotecas de Firebase (ESPECÍFICAS DE ESTE ENTORNO)
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged, setPersistence, browserLocalPersistence } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, doc, setDoc, onSnapshot, collection, query, addDoc, updateDoc, deleteDoc, getDoc, setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { getFirestore, doc, setDoc, onSnapshot, collection, setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
         
         // --- 1. CONFIGURACIÓN Y VARIABLES GLOBALES (OBLIGATORIAS) ---
         
         // Variables globales proporcionadas por el entorno
         const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-        const firebaseConfig = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
+        const firebaseConfigString = typeof __firebase_config !== 'undefined' ? __firebase_config : '{}';
         const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
-
+        
+        let firebaseConfig = {};
         let app, db, auth;
-        let userId = null; // ID del usuario actual (anónimo)
+        let userId = null; 
         let isAuthReady = false;
         
         // --- 2. Datos Maestros ---
@@ -181,22 +180,16 @@
         ];
         
         const ALL_SUBPROJECT_OPTIONS = [
-            "Mediciones",
-            "Paradero",
-            "Justificaciones",
-            "Reprogramación",
-            "IMIV Básico",
-            "SYD",
-            "Ciclovía",
-            "Oros"
+            "Mediciones", "Paradero", "Justificaciones", "Reprogramación",
+            "IMIV Básico", "SYD", "Ciclovía", "Oros"
         ];
 
         // --- 3. Estado de la Aplicación (Cache Local) ---
-        let projectsData = []; // Cache para datos de proyectos desde Firestore
+        let projectsData = []; 
         let currentTab = 'input'; 
-        let currentDetailProject = null; // Proyecto seleccionado en Tab 3
-        let selectedProjectId = null; // Usado para modales/edición
-        let selectedSubprojectId = null; // Usado para modales/edición
+        let currentDetailProject = null;
+        let selectedProjectId = null;
+        let selectedSubprojectId = null;
         
         // --- 4. Funciones de Utilidad y Modales ---
 
@@ -212,9 +205,27 @@
         }
 
         /**
+         * Actualiza el panel de diagnóstico de conexión.
+         */
+        function updateStatus(message, type = 'info') {
+            const container = document.getElementById('auth-status');
+            const colorClass = type === 'error' ? 'text-red-600 font-bold' : (type === 'success' ? 'text-green-600 font-bold' : 'text-gray-800');
+            container.innerHTML += `<p class="${colorClass}">• ${message}</p>`;
+            
+            if (type === 'error') {
+                 document.getElementById('auth-status-container').classList.add('border-red-400');
+                 document.getElementById('auth-status-container').classList.remove('border-gray-200');
+            } else if (type === 'success') {
+                 document.getElementById('auth-status-container').classList.add('border-green-400');
+                 document.getElementById('auth-status-container').classList.remove('border-gray-200');
+            }
+        }
+        
+        /**
          * Función general para cerrar cualquier modal.
          */
         window.closeModal = (modalId) => {
+            // ... (Lógica de closeModal, la misma que la anterior)
             const modalEl = document.getElementById(modalId);
             if (modalEl) {
                 modalEl.classList.add('hidden');
@@ -227,54 +238,87 @@
         };
 
         /**
-         * Genera un ID simple (simulando un UUID)
+         * Genera un ID simple.
          */
         function generateId() {
             return Date.now().toString(36) + Math.random().toString(36).substring(2);
         }
 
-        // --- 5. Lógica de Firebase y Sincronización ---
+        // --- 5. Lógica de Firebase y Sincronización (Diagnóstico Añadido) ---
         
         /**
-         * Inicializa Firebase, autentica al usuario (anónimamente si no hay token) y establece el listener de datos.
+         * Inicializa Firebase, autentica al usuario y establece el listener de datos.
          */
         async function initializeFirebase() {
-            setLogLevel('debug'); // Habilitar logs para depuración
+            setLogLevel('debug'); // Habilitar logs detallados en la consola
             
+            // 1. Validar y Parsear Configuración
+            updateStatus("Paso 1: Chequeando configuración de Firebase...");
             try {
-                // 1. Inicializar App y Servicios
+                firebaseConfig = JSON.parse(firebaseConfigString);
+                if (!firebaseConfig.apiKey || !firebaseConfig.projectId) {
+                    throw new Error("Configuración de Firebase incompleta (Falta apiKey o projectId).");
+                }
+                updateStatus(`Configuración OK. Project ID: ${firebaseConfig.projectId}`, 'info');
+            } catch (e) {
+                updateStatus(`Error en Configuración: ${e.message}`, 'error');
+                return;
+            }
+
+            try {
+                // 2. Inicializar App y Servicios
                 app = initializeApp(firebaseConfig);
                 db = getFirestore(app);
                 auth = getAuth(app);
-                
-                // 2. Autenticación (Permitir colaboración sin login formal)
-                if (initialAuthToken) {
-                    await signInWithCustomToken(auth, initialAuthToken);
-                } else {
-                    await signInAnonymously(auth);
-                }
+                updateStatus("Paso 2: Firebase App y Servicios inicializados.", 'info');
 
                 // 3. Listener de Estado de Autenticación
+                updateStatus("Paso 3: Configurando listener de autenticación (onAuthStateChanged)...");
                 onAuthStateChanged(auth, (user) => {
                     if (user) {
                         userId = user.uid;
                         isAuthReady = true;
-                        document.getElementById('auth-status').innerHTML = `
-                            Conectado. Tu ID de Colaboración es: <span class="font-mono text-xs">${userId}</span>
-                        `;
                         
+                        // Actualizar UI de estado FINAL
+                        const statusMessage = `Conexión Exitosa. Tu ID de Colaboración es: <span class="font-mono text-xs">${userId}</span>`;
+                        const container = document.getElementById('auth-status');
+                        container.innerHTML += `<p class="text-green-700 font-bold">• ${statusMessage}</p>`;
+                        
+                        updateStatus("Paso 4: Autenticación verificada. Iniciando escucha de datos.", 'success');
+
                         // Una vez autenticado, iniciar la escucha de datos
                         setupRealtimeListener();
+                        renderTabContent(); 
+                        
                     } else {
-                        console.error("No se pudo autenticar al usuario.");
-                        document.getElementById('auth-status').textContent = "Error: No se pudo conectar a la base de datos.";
-                        isAuthReady = true; // Permite el inicio si falla, aunque sin datos.
+                        // Esto debería capturar fallos de autenticación después del intento de sign-in
+                        if (isAuthReady) {
+                             // Si ya intentamos autenticar y falló
+                             updateStatus("Error de Autenticación: El listener no encontró un usuario. Posible fallo en signInWithCustomToken o signInAnonymously.", 'error');
+                             return;
+                        }
+                        // Si no hay usuario, el sistema intentará sign-in más adelante.
                     }
                 });
 
+                // 4. Intento de Autenticación Inicial
+                updateStatus(`Paso 4: Intentando autenticación. (Token presente: ${!!initialAuthToken})...`);
+                if (initialAuthToken) {
+                    await signInWithCustomToken(auth, initialAuthToken);
+                    updateStatus("Autenticación con Token Personalizado solicitada.", 'info');
+                } else {
+                    await signInAnonymously(auth);
+                    updateStatus("Autenticación Anónima solicitada.", 'info');
+                }
+                
             } catch (error) {
+                // Esto captura errores durante initializeApp o signInWithCustomToken/signInAnonymously
+                const errorMessage = error.message || "Error desconocido durante la conexión o autenticación.";
+                updateStatus(`ERROR CRÍTICO: Fallo al conectar o autenticar. Mensaje: ${errorMessage}`, 'error');
                 console.error("Error al inicializar Firebase o autenticar:", error);
-                showMessage("Error Crítico", "No se pudo conectar al sistema de datos centralizados.");
+                showMessage("Error Crítico de Conexión", `Por favor, revisa el panel de diagnóstico para más detalles. Error: ${errorMessage}`);
+                isAuthReady = true; // Permite renderizar la UI vacía
+                renderTabContent();
             }
         }
 
@@ -291,7 +335,6 @@
                 const newProjectsData = [];
                 snapshot.forEach(doc => {
                     const data = doc.data();
-                    // Aseguramos que los subproyectos se deserialicen si se guardaron como JSON (no es necesario con la estructura actual)
                     newProjectsData.push({ id: doc.id, ...data });
                 });
                 
@@ -309,13 +352,13 @@
                 renderTabContent();
             }, (error) => {
                 console.error("Error en el listener de Firestore:", error);
+                updateStatus(`Error en el Listener de Datos: ${error.message}`, 'error');
                 showMessage("Error de Sincronización", "Se perdió la conexión en tiempo real con la base de datos.");
             });
         }
         
         /**
          * Guarda o actualiza un proyecto completo en Firestore.
-         * @param {object} projectData - El objeto de proyecto a guardar.
          */
         async function saveProjectToFirestore(projectData) {
             if (!db || !isAuthReady) {
@@ -325,9 +368,7 @@
 
             try {
                 const docRef = doc(db, PUBLIC_PROJECTS_COLLECTION, projectData.id);
-                // Usamos setDoc para sobrescribir o crear el documento con el ID dado
                 await setDoc(docRef, projectData);
-                // No necesitamos refrescar localmente, onSnapshot se encargará de ello.
                 console.log(`Proyecto guardado/actualizado: ${projectData.id}`);
             } catch (e) {
                 console.error("Error al guardar el proyecto en Firestore:", e);
@@ -335,7 +376,7 @@
             }
         }
 
-        // --- 6. Funciones de Creación y Modificación (Modificadas para usar Firestore) ---
+        // --- 6. Funciones de Creación y Modificación ---
         
         /**
          * Crea un nuevo proyecto y lo guarda en Firestore.
@@ -354,7 +395,6 @@
                 return;
             }
         
-            // Mapear los subproyectos seleccionados con estado inicial "Pendiente" (índice 0)
             const subProjects = Array.from(checkboxes).map(checkbox => ({
                 id: generateId(),
                 name: checkbox.value,
@@ -382,7 +422,7 @@
         };
         
         
-        // --- 7. Funciones de Actualización de Datos (Compartido por Tab 2 y Tab 3) ---
+        // --- 7. Funciones de Actualización de Datos ---
         
         /**
          * Busca un subproyecto y lo actualiza en la caché y en Firestore.
@@ -396,7 +436,6 @@
                 if (subProjectIndex !== -1) {
                     const subProject = project.subProjects[subProjectIndex];
                     
-                    // Crear una copia del proyecto y subproyectos para la inmutabilidad
                     const updatedProject = { ...project };
                     const updatedSubProjects = [...project.subProjects];
                     
@@ -440,7 +479,7 @@
             const newComment = {
                 text: commentText,
                 timestamp: new Date().toISOString(),
-                authorId: userId // Usar el ID de usuario anónimo
+                authorId: userId
             };
         
             const project = projectsData.find(p => p.id === selectedProjectId);
@@ -453,18 +492,21 @@
                 
                 inputEl.value = '';
 
-                // Si estamos en el modal de Tab 2, re-renderizar solo las notas del modal (se usa la cache antes del onSnapshot)
+                // Si estamos en el modal de Tab 2, re-renderizar solo las notas del modal (la caché se actualizará luego)
                 if (!isDetailTab) {
-                     renderComments(updatedComments);
+                     // Debemos obtener el proyecto actualizado de la caché para renderizar correctamente
+                     // Aunque el onSnapshot se encarga, para el render inmediato del modal, actualizamos la lista de comentarios.
+                     const updatedSubProject = projectsData.find(p => p.id === selectedProjectId)?.subProjects.find(sp => sp.id === selectedSubprojectId);
+                     if (updatedSubProject) {
+                        renderComments(updatedSubProject.comments || []);
+                     }
                 }
-                // Si estamos en Tab 3, el onSnapshot (disparado por saveProjectToFirestore) se encarga de re-renderizar.
             }
         };
 
-        // Función auxiliar para Tab 3, llama a la función central de añadir comentario.
         window.addCommentFromDetail = window.addComment;
         
-        // --- 8. Lógica de Navegación y Renderizado de Pestañas (Mantenidas) ---
+        // --- 8. Lógica de Navegación y Renderizado de Pestañas ---
         
         const tabContentContainerEl = document.getElementById('tab-content-container');
         
@@ -490,7 +532,7 @@
             
             // Mostrar mensaje de carga si los datos no están listos
             if (!isAuthReady) {
-                 html = '<div class="p-8 text-center text-gray-500">Conectando a la base de datos en tiempo real...</div>';
+                 html = '<div class="p-8 text-center text-gray-500">Esperando autenticación y carga de datos. Consulta el panel de diagnóstico arriba.</div>';
             } else if (projectsData.length === 0 && currentTab !== 'input') {
                 html = '<div class="p-8 text-center text-gray-500">No hay proyectos creados. Ve a la pestaña "1. Ingreso de Proyecto" para empezar.</div>';
             } else {
@@ -502,7 +544,7 @@
                         html = renderSummaryTab();
                         break;
                     case 'detail':
-                        // Asegurar que haya un proyecto seleccionado al entrar en la vista de detalle
+                        // Lógica para asegurar la selección del proyecto de detalle
                         if (projectsData.length > 0) {
                              if (!currentDetailProject || !projectsData.find(p => p.id === currentDetailProject.id)) {
                                 currentDetailProject = projectsData[0];
@@ -517,10 +559,8 @@
         
             // Lógica post-renderizado para Tab 3 (Detalle)
             if (currentTab === 'detail' && currentDetailProject) {
-                // Re-renderizar la lista de subproyectos (Columna 2)
                 renderDetailSubprojects(currentDetailProject.id);
                 
-                // Si hay un subproyecto seleccionado, asegurar que se muestre su detalle
                 if (selectedSubprojectId) {
                     const project = projectsData.find(p => p.id === currentDetailProject.id);
                     const subproject = project?.subProjects.find(s => s.id === selectedSubprojectId);
@@ -540,7 +580,8 @@
         // --- 8.1. Tab 1: Ingreso de Proyecto ---
         
         function renderInputTab() {
-            const subprojectChecklist = ALL_SUBPROJECT_OPTIONS.map(name => `
+            // (Mismo contenido HTML para Tab 1)
+             const subprojectChecklist = ALL_SUBPROJECT_OPTIONS.map(name => `
                 <div class="flex items-center">
                     <input id="sub-${name.replace(/\s/g, '-')}" type="checkbox" value="${name}" 
                            class="h-4 w-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500">
@@ -657,7 +698,7 @@
             `;
         }
         
-        // --- 8.3. Tab 3: Detalle y Notas (Lógica de Renderizado similar a la anterior) ---
+        // --- 8.3. Tab 3: Detalle y Notas ---
         
         function renderProjectListDetail() {
             return projectsData.map(project => `
@@ -730,18 +771,14 @@
         }
         
         /**
-         * Selecciona un proyecto en la vista de Detalle (Tab 3).
+         * Funciones de selección de detalle (sin cambios)
          */
         window.selectDetailProject = (projectId) => {
             currentDetailProject = projectsData.find(p => p.id === projectId);
-            selectedSubprojectId = null; // Resetear la selección del subproyecto
-            
-            renderTabContent(); // Re-renderizar para actualizar la UI
+            selectedSubprojectId = null;
+            renderTabContent();
         };
         
-        /**
-         * Renderiza los subproyectos de un proyecto seleccionado en Tab 3.
-         */
         function renderDetailSubprojects(projectId) {
             const project = projectsData.find(p => p.id === projectId);
             const listEl = document.getElementById('subprojects-detail-list');
@@ -762,9 +799,6 @@
             listEl.innerHTML = subprojectsHtml;
         }
         
-        /**
-         * Selecciona un subproyecto para ver sus notas en Tab 3.
-         */
         window.selectDetailSubproject = (projectId, subprojectId) => {
             selectedProjectId = projectId;
             selectedSubprojectId = subprojectId;
@@ -779,14 +813,11 @@
                 const notesSection = document.getElementById('detail-notes-section');
                 if(notesSection) notesSection.classList.remove('hidden');
                 
-                renderDetailSubprojects(projectId); // Para marcar el subproyecto seleccionado
-                renderDetailSubproject(projectId, subproject); // Renderizar las notas y el formulario
+                renderDetailSubprojects(projectId);
+                renderDetailSubproject(projectId, subproject);
             }
         };
         
-        /**
-         * Renderiza el contenido de notas para el subproyecto seleccionado en Tab 3.
-         */
         function renderDetailSubproject(projectId, subproject) {
             selectedProjectId = projectId;
             selectedSubprojectId = subproject.id;
@@ -833,7 +864,9 @@
                 comments = JSON.parse(commentsJsonString.replace(/&quot;/g, '"'));
             } catch (e) {
                 console.error("Error al parsear comentarios:", e);
-                comments = [];
+                // Si el parseo falla, buscamos el subproyecto directamente en la caché actualizada
+                const project = projectsData.find(p => p.id === projectId);
+                comments = project?.subProjects.find(s => s.id === subprojectId)?.comments || [];
             }
             
             renderComments(comments); 
@@ -873,7 +906,7 @@
             }
         }
         
-        // --- 9.1. Lógica del Modal de Edición de Subproyectos (Modificada para usar Firestore) ---
+        // --- 9.1. Lógica del Modal de Edición de Subproyectos (Mantenida) ---
 
         /**
          * Abre el modal de edición de subproyectos.
@@ -955,7 +988,6 @@
             saveProjectToFirestore(updatedProject);
             
             closeModal('edit-modal');
-            // onSnapshot se encargará de refrescar el contenido.
         };
 
         
@@ -979,9 +1011,7 @@
          * Inicia la aplicación al cargar la página.
          */
         function initializeApp() {
-            // No cargamos de LocalStorage, inicializamos Firebase
             initializeFirebase();
-            // La primera renderización mostrará el mensaje de "Conectando..."
             renderTabContent(); 
         }
 
