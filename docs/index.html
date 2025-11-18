@@ -1,0 +1,992 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gestor de Proyectos (Tiempo Real)</title>
+    <!-- Carga de Tailwind CSS para el diseño -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Fuente Inter -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; background-color: #f7f9fb; }
+        .tab-button.active { border-color: #2563eb; color: #2563eb; background-color: #eff6ff; font-weight: 600; }
+        
+        /* Estilos para los indicadores de estado */
+        .status-pill { padding: 4px 10px; border-radius: 9999px; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; }
+        .status-0 { background-color: #ffe0b2; color: #ff9800; } /* Pendiente */
+        .status-1 { background-color: #bbdefb; color: #2196f3; } /* Ingresado */
+        .status-2 { background-color: #c8e6c9; color: #4caf50; } /* Realizado */
+        .status-3 { background-color: #ffcdd2; color: #f44336; } /* Observado */
+        .status-4 { background-color: #b2ebf2; color: #00bcd4; } /* Reingresado */
+        .status-5 { background-color: #d1c4e9; color: #673ab7; } /* Aprobado */
+        
+        /* Estilos de scrollbar personalizados */
+        .custom-scroll::-webkit-scrollbar { width: 6px; }
+        .custom-scroll::-webkit-scrollbar-thumb { background-color: #cbd5e1; border-radius: 3px; }
+        
+        .summary-cell { min-width: 150px; }
+        .project-row:hover { background-color: #f0f4f8; }
+        
+        /* Estilos específicos para las columnas pegajosas */
+        .sticky-col-left-1 {
+            position: sticky;
+            left: 0;
+            z-index: 10;
+        }
+        .sticky-col-left-2 {
+            position: sticky;
+            left: 80px; 
+            z-index: 10;
+        }
+        /* Color de fondo para las columnas pegajosas */
+        .sticky-col-left-1, .sticky-col-left-2 { background-color: #f7f9fb; }
+        .project-row:nth-child(even) .sticky-col-left-1, .project-row:nth-child(even) .sticky-col-left-2 { background-color: #f0f4f8; }
+
+    </style>
+</head>
+<body class="p-4 md:p-8">
+
+    <header class="max-w-7xl mx-auto mb-8">
+        <h1 class="text-3xl md:text-4xl font-bold text-gray-800 mb-2">Gestor de Proyectos <span class="text-green-600">(Tiempo Real)</span></h1>
+        <p class="text-gray-500">Los datos se sincronizan al instante para todos los usuarios. Funciona como un "Excel Compartido".</p>
+        <p id="auth-status" class="text-sm font-medium mt-2 p-2 bg-blue-100 text-blue-800 rounded-lg">Cargando conexión...</p>
+    </header>
+    
+    <!-- Contenido Principal Dinámico -->
+    <div class="max-w-7xl mx-auto bg-white rounded-t-xl shadow-md border-b border-gray-200">
+        <!-- Controles de Pestañas -->
+        <div class="flex border-b border-gray-200">
+            <button id="tab-input" onclick="changeTab('input')" class="tab-button active p-4 text-gray-600 border-b-2 border-transparent hover:border-blue-500 transition duration-150">
+                1. Ingreso de Proyecto
+            </button>
+            <button id="tab-summary" onclick="changeTab('summary')" class="tab-button p-4 text-gray-600 border-b-2 border-transparent hover:border-blue-500 transition duration-150">
+                2. Tabla Resumen
+            </button>
+            <button id="tab-detail" onclick="changeTab('detail')" class="tab-button p-4 text-gray-600 border-b-2 border-transparent hover:border-blue-500 transition duration-150">
+                3. Detalle y Notas
+            </button>
+        </div>
+    </div>
+    
+    <main id="tab-content-container" class="max-w-7xl mx-auto bg-white p-6 rounded-b-xl shadow-md border-t-0 border-gray-200">
+        <!-- El contenido de la pestaña se inyectará aquí -->
+    </main>
+    
+    <!-- Modales (Mantenidos) -->
+    
+    <!-- Modal de Comentarios (Usado en la vista de Resumen) -->
+    <div id="comments-modal" class="fixed inset-0 bg-gray-900 bg-opacity-75 hidden items-center justify-center p-4 z-50">
+        <div class="bg-white rounded-xl shadow-2xl w-full max-w-xl max-h-[90vh] flex flex-col">
+            <header class="p-6 border-b border-gray-200 flex justify-between items-center">
+                <h3 class="text-xl font-semibold text-gray-800">Notas para: <span id="modal-subproject-name" class="text-blue-600"></span></h3>
+                <button onclick="closeModal('comments-modal')" class="text-gray-400 hover:text-gray-600 transition">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                </button>
+            </header>
+
+            <div class="p-6 flex-grow custom-scroll overflow-y-auto">
+                <div id="comments-list" class="space-y-4">
+                    <!-- Las notas se inyectarán aquí por JS -->
+                </div>
+            </div>
+
+            <footer class="p-6 border-t border-gray-200">
+                <textarea id="comment-input" placeholder="Añadir una nueva nota..."
+                          class="w-full p-3 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500 mb-3 resize-none"></textarea>
+                <button onclick="addComment()" id="add-comment-btn"
+                        class="w-full bg-green-600 text-white p-3 rounded-lg font-semibold hover:bg-green-700 transition duration-150">
+                    Guardar Nota
+                </button>
+                <p id="comment-error" class="text-red-500 text-sm mt-2 hidden">La nota no puede estar vacía.</p>
+            </footer>
+        </div>
+    </div>
+    
+    <!-- Modal de Edición de Subproyectos -->
+    <div id="edit-modal" class="fixed inset-0 bg-gray-900 bg-opacity-75 hidden items-center justify-center p-4 z-50">
+        <div class="bg-white rounded-xl shadow-2xl w-full max-w-lg max-h-[90vh] flex flex-col">
+            <header class="p-6 border-b border-gray-200 flex justify-between items-center">
+                <h3 class="text-xl font-semibold text-gray-800">Editar Subproyectos para: <span id="edit-modal-project-name" class="text-blue-600"></span></h3>
+                <button onclick="closeModal('edit-modal')" class="text-gray-400 hover:text-gray-600 transition">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                </button>
+            </header>
+
+            <div class="p-6 flex-grow custom-scroll overflow-y-auto">
+                <div id="edit-subproject-checklist" class="grid grid-cols-2 gap-3 p-4 bg-gray-50 rounded-lg border border-gray-200">
+                    <!-- Checklists se inyectarán aquí por JS -->
+                </div>
+            </div>
+
+            <footer class="p-6 border-t border-gray-200">
+                <button onclick="saveEditedSubprojects()"
+                        class="w-full bg-blue-600 text-white p-3 rounded-lg font-semibold hover:bg-blue-700 transition duration-150">
+                    Guardar Cambios
+                </button>
+            </footer>
+        </div>
+    </div>
+    
+    <!-- Modal de Mensajes (Reemplazo de alert/confirm) -->
+    <div id="message-modal" class="fixed inset-0 bg-gray-900 bg-opacity-75 hidden items-center justify-center p-4 z-50">
+        <div class="bg-white rounded-xl shadow-2xl w-full max-w-sm">
+            <header class="p-4 border-b border-gray-200">
+                <h3 id="message-title" class="text-lg font-semibold text-gray-800"></h3>
+            </header>
+            <div class="p-4">
+                <p id="message-body" class="text-gray-700"></p>
+            </div>
+            <footer class="p-4 border-t border-gray-200 flex justify-end">
+                <button onclick="closeModal('message-modal')"
+                        class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition">Aceptar</button>
+            </footer>
+        </div>
+    </div>
+
+
+    <!-- INICIO DE CÓDIGO JAVASCRIPT (Lógica de la aplicación) -->
+    <script type="module">
+        // Importar las bibliotecas de Firebase (ESPECÍFICAS DE ESTE ENTORNO)
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged, setPersistence, browserLocalPersistence } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, setDoc, onSnapshot, collection, query, addDoc, updateDoc, deleteDoc, getDoc, setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        
+        // --- 1. CONFIGURACIÓN Y VARIABLES GLOBALES (OBLIGATORIAS) ---
+        
+        // Variables globales proporcionadas por el entorno
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        const firebaseConfig = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
+        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+
+        let app, db, auth;
+        let userId = null; // ID del usuario actual (anónimo)
+        let isAuthReady = false;
+        
+        // --- 2. Datos Maestros ---
+        
+        const PUBLIC_PROJECTS_COLLECTION = `artifacts/${appId}/public/data/projects`;
+        
+        const STATUSES = [
+            { name: "Pendiente", class: "status-0" },
+            { name: "Ingresado", class: "status-1" },
+            { name: "Realizado", class: "status-2" },
+            { name: "Observado", class: "status-3" },
+            { name: "Reingresado", class: "status-4" },
+            { name: "Aprobado", class: "status-5" }
+        ];
+        
+        const ALL_SUBPROJECT_OPTIONS = [
+            "Mediciones",
+            "Paradero",
+            "Justificaciones",
+            "Reprogramación",
+            "IMIV Básico",
+            "SYD",
+            "Ciclovía",
+            "Oros"
+        ];
+
+        // --- 3. Estado de la Aplicación (Cache Local) ---
+        let projectsData = []; // Cache para datos de proyectos desde Firestore
+        let currentTab = 'input'; 
+        let currentDetailProject = null; // Proyecto seleccionado en Tab 3
+        let selectedProjectId = null; // Usado para modales/edición
+        let selectedSubprojectId = null; // Usado para modales/edición
+        
+        // --- 4. Funciones de Utilidad y Modales ---
+
+        /**
+         * Muestra un mensaje de modal personalizado (reemplazo de alert/confirm).
+         */
+        function showMessage(title, body) {
+            document.getElementById('message-title').textContent = title;
+            document.getElementById('message-body').textContent = body;
+            const modalEl = document.getElementById('message-modal');
+            modalEl.classList.remove('hidden');
+            modalEl.classList.add('flex');
+        }
+
+        /**
+         * Función general para cerrar cualquier modal.
+         */
+        window.closeModal = (modalId) => {
+            const modalEl = document.getElementById(modalId);
+            if (modalEl) {
+                modalEl.classList.add('hidden');
+                modalEl.classList.remove('flex');
+            }
+            if (modalId === 'comments-modal') {
+                document.getElementById('comment-input').value = '';
+                document.getElementById('comment-error').classList.add('hidden');
+            }
+        };
+
+        /**
+         * Genera un ID simple (simulando un UUID)
+         */
+        function generateId() {
+            return Date.now().toString(36) + Math.random().toString(36).substring(2);
+        }
+
+        // --- 5. Lógica de Firebase y Sincronización ---
+        
+        /**
+         * Inicializa Firebase, autentica al usuario (anónimamente si no hay token) y establece el listener de datos.
+         */
+        async function initializeFirebase() {
+            setLogLevel('debug'); // Habilitar logs para depuración
+            
+            try {
+                // 1. Inicializar App y Servicios
+                app = initializeApp(firebaseConfig);
+                db = getFirestore(app);
+                auth = getAuth(app);
+                
+                // 2. Autenticación (Permitir colaboración sin login formal)
+                if (initialAuthToken) {
+                    await signInWithCustomToken(auth, initialAuthToken);
+                } else {
+                    await signInAnonymously(auth);
+                }
+
+                // 3. Listener de Estado de Autenticación
+                onAuthStateChanged(auth, (user) => {
+                    if (user) {
+                        userId = user.uid;
+                        isAuthReady = true;
+                        document.getElementById('auth-status').innerHTML = `
+                            Conectado. Tu ID de Colaboración es: <span class="font-mono text-xs">${userId}</span>
+                        `;
+                        
+                        // Una vez autenticado, iniciar la escucha de datos
+                        setupRealtimeListener();
+                    } else {
+                        console.error("No se pudo autenticar al usuario.");
+                        document.getElementById('auth-status').textContent = "Error: No se pudo conectar a la base de datos.";
+                        isAuthReady = true; // Permite el inicio si falla, aunque sin datos.
+                    }
+                });
+
+            } catch (error) {
+                console.error("Error al inicializar Firebase o autenticar:", error);
+                showMessage("Error Crítico", "No se pudo conectar al sistema de datos centralizados.");
+            }
+        }
+
+        /**
+         * Establece el listener de cambios en tiempo real desde Firestore.
+         */
+        function setupRealtimeListener() {
+            if (!db || !isAuthReady) return;
+
+            const projectsRef = collection(db, PUBLIC_PROJECTS_COLLECTION);
+            
+            // Usamos onSnapshot para recibir actualizaciones en tiempo real
+            onSnapshot(projectsRef, (snapshot) => {
+                const newProjectsData = [];
+                snapshot.forEach(doc => {
+                    const data = doc.data();
+                    // Aseguramos que los subproyectos se deserialicen si se guardaron como JSON (no es necesario con la estructura actual)
+                    newProjectsData.push({ id: doc.id, ...data });
+                });
+                
+                // 1. Actualizar la caché local
+                projectsData = newProjectsData;
+                
+                // 2. Mantener la selección actual del proyecto de detalle
+                if (currentDetailProject) {
+                    currentDetailProject = projectsData.find(p => p.id === currentDetailProject.id) || projectsData[0] || null;
+                } else if (projectsData.length > 0) {
+                    currentDetailProject = projectsData[0];
+                }
+                
+                // 3. Refrescar la interfaz
+                renderTabContent();
+            }, (error) => {
+                console.error("Error en el listener de Firestore:", error);
+                showMessage("Error de Sincronización", "Se perdió la conexión en tiempo real con la base de datos.");
+            });
+        }
+        
+        /**
+         * Guarda o actualiza un proyecto completo en Firestore.
+         * @param {object} projectData - El objeto de proyecto a guardar.
+         */
+        async function saveProjectToFirestore(projectData) {
+            if (!db || !isAuthReady) {
+                showMessage("Error de Conexión", "La aplicación no está lista para guardar datos. Inténtalo de nuevo.");
+                return;
+            }
+
+            try {
+                const docRef = doc(db, PUBLIC_PROJECTS_COLLECTION, projectData.id);
+                // Usamos setDoc para sobrescribir o crear el documento con el ID dado
+                await setDoc(docRef, projectData);
+                // No necesitamos refrescar localmente, onSnapshot se encargará de ello.
+                console.log(`Proyecto guardado/actualizado: ${projectData.id}`);
+            } catch (e) {
+                console.error("Error al guardar el proyecto en Firestore:", e);
+                showMessage("Error de Guardado", `No se pudo guardar el proyecto ${projectData.name}. Revisa la consola.`);
+            }
+        }
+
+        // --- 6. Funciones de Creación y Modificación (Modificadas para usar Firestore) ---
+        
+        /**
+         * Crea un nuevo proyecto y lo guarda en Firestore.
+         */
+        window.createProject = () => {
+            const projectName = document.getElementById('input-project-name').value.trim();
+            const projectCode = document.getElementById('input-project-code').value.trim();
+            const checkboxes = document.querySelectorAll('#subproject-checklist input:checked');
+        
+            if (!projectName || !projectCode) {
+                showMessage("Error de Ingreso", "Por favor, ingresa el Nombre y el Código del proyecto.");
+                return;
+            }
+            if (checkboxes.length === 0) {
+                 showMessage("Error de Ingreso", "Por favor, selecciona al menos un subproyecto.");
+                return;
+            }
+        
+            // Mapear los subproyectos seleccionados con estado inicial "Pendiente" (índice 0)
+            const subProjects = Array.from(checkboxes).map(checkbox => ({
+                id: generateId(),
+                name: checkbox.value,
+                status: 0, // 0 = Pendiente
+                comments: []
+            }));
+        
+            const newProject = {
+                id: generateId(),
+                name: projectName,
+                code: projectCode.toUpperCase(),
+                createdAt: new Date().toISOString(),
+                subProjects: subProjects,
+                lastUpdatedBy: userId,
+            };
+        
+            saveProjectToFirestore(newProject);
+        
+            // Limpiar formulario y cambiar a pestaña de resumen
+            document.getElementById('input-project-name').value = '';
+            document.getElementById('input-project-code').value = '';
+            checkboxes.forEach(cb => cb.checked = false);
+            
+            window.changeTab('summary');
+        };
+        
+        
+        // --- 7. Funciones de Actualización de Datos (Compartido por Tab 2 y Tab 3) ---
+        
+        /**
+         * Busca un subproyecto y lo actualiza en la caché y en Firestore.
+         */
+        function updateSubproject(projectId, subprojectId, updates) {
+            const project = projectsData.find(p => p.id === projectId);
+        
+            if (project) {
+                const subProjectIndex = project.subProjects.findIndex(sp => sp.id === subprojectId);
+        
+                if (subProjectIndex !== -1) {
+                    const subProject = project.subProjects[subProjectIndex];
+                    
+                    // Crear una copia del proyecto y subproyectos para la inmutabilidad
+                    const updatedProject = { ...project };
+                    const updatedSubProjects = [...project.subProjects];
+                    
+                    updatedSubProjects[subProjectIndex] = { ...subProject, ...updates };
+                    
+                    updatedProject.subProjects = updatedSubProjects;
+                    updatedProject.lastUpdatedBy = userId;
+                    
+                    // Guardar el proyecto actualizado en Firestore (lo que disparará onSnapshot)
+                    saveProjectToFirestore(updatedProject);
+                }
+            }
+        }
+
+        /**
+         * Actualiza el estado de un subproyecto.
+         */
+        window.updateSubprojectStatus = (projectId, subprojectId, newStatus) => {
+            updateSubproject(projectId, subprojectId, { status: newStatus });
+        };
+        
+        /**
+         * Añade un comentario (nota) al subproyecto seleccionado.
+         */
+        window.addComment = () => {
+            if (!selectedProjectId || !selectedSubprojectId) return;
+        
+            // Determinar si el comentario viene del modal (Tab 2) o del detalle (Tab 3)
+            const isDetailTab = currentTab === 'detail';
+            const inputEl = document.getElementById(isDetailTab ? 'detail-comment-input' : 'comment-input');
+            const errorEl = document.getElementById(isDetailTab ? 'detail-comment-error' : 'comment-error');
+            
+            const commentText = inputEl.value.trim();
+        
+            if (!commentText) {
+                if(errorEl) errorEl.classList.remove('hidden');
+                return;
+            }
+            if(errorEl) errorEl.classList.add('hidden');
+            
+            const newComment = {
+                text: commentText,
+                timestamp: new Date().toISOString(),
+                authorId: userId // Usar el ID de usuario anónimo
+            };
+        
+            const project = projectsData.find(p => p.id === selectedProjectId);
+            const subProject = project?.subProjects.find(sp => sp.id === selectedSubprojectId);
+        
+            if (subProject) {
+                const updatedComments = [...(subProject.comments || []), newComment];
+                
+                updateSubproject(selectedProjectId, selectedSubprojectId, { comments: updatedComments });
+                
+                inputEl.value = '';
+
+                // Si estamos en el modal de Tab 2, re-renderizar solo las notas del modal (se usa la cache antes del onSnapshot)
+                if (!isDetailTab) {
+                     renderComments(updatedComments);
+                }
+                // Si estamos en Tab 3, el onSnapshot (disparado por saveProjectToFirestore) se encarga de re-renderizar.
+            }
+        };
+
+        // Función auxiliar para Tab 3, llama a la función central de añadir comentario.
+        window.addCommentFromDetail = window.addComment;
+        
+        // --- 8. Lógica de Navegación y Renderizado de Pestañas (Mantenidas) ---
+        
+        const tabContentContainerEl = document.getElementById('tab-content-container');
+        
+        /**
+         * Cambia la pestaña activa y actualiza el contenido.
+         */
+        window.changeTab = (tabName) => {
+            currentTab = tabName;
+            document.querySelectorAll('.tab-button').forEach(btn => {
+                btn.classList.remove('active');
+                if (btn.id === `tab-${tabName}`) {
+                    btn.classList.add('active');
+                }
+            });
+            renderTabContent();
+        };
+        
+        /**
+         * Renderiza el contenido específico de la pestaña activa.
+         */
+        function renderTabContent() {
+            let html = '';
+            
+            // Mostrar mensaje de carga si los datos no están listos
+            if (!isAuthReady) {
+                 html = '<div class="p-8 text-center text-gray-500">Conectando a la base de datos en tiempo real...</div>';
+            } else if (projectsData.length === 0 && currentTab !== 'input') {
+                html = '<div class="p-8 text-center text-gray-500">No hay proyectos creados. Ve a la pestaña "1. Ingreso de Proyecto" para empezar.</div>';
+            } else {
+                switch (currentTab) {
+                    case 'input':
+                        html = renderInputTab();
+                        break;
+                    case 'summary':
+                        html = renderSummaryTab();
+                        break;
+                    case 'detail':
+                        // Asegurar que haya un proyecto seleccionado al entrar en la vista de detalle
+                        if (projectsData.length > 0) {
+                             if (!currentDetailProject || !projectsData.find(p => p.id === currentDetailProject.id)) {
+                                currentDetailProject = projectsData[0];
+                             }
+                        }
+                        html = renderDetailTab();
+                        break;
+                }
+            }
+        
+            tabContentContainerEl.innerHTML = html;
+        
+            // Lógica post-renderizado para Tab 3 (Detalle)
+            if (currentTab === 'detail' && currentDetailProject) {
+                // Re-renderizar la lista de subproyectos (Columna 2)
+                renderDetailSubprojects(currentDetailProject.id);
+                
+                // Si hay un subproyecto seleccionado, asegurar que se muestre su detalle
+                if (selectedSubprojectId) {
+                    const project = projectsData.find(p => p.id === currentDetailProject.id);
+                    const subproject = project?.subProjects.find(s => s.id === selectedSubprojectId);
+                    
+                    if (subproject) {
+                        const notesSection = document.getElementById('detail-notes-section');
+                        if(notesSection) notesSection.classList.remove('hidden');
+                        renderDetailSubproject(currentDetailProject.id, subproject);
+                    }
+                } else {
+                    const notesSection = document.getElementById('detail-notes-section');
+                    if(notesSection) notesSection.classList.add('hidden');
+                }
+            }
+        }
+        
+        // --- 8.1. Tab 1: Ingreso de Proyecto ---
+        
+        function renderInputTab() {
+            const subprojectChecklist = ALL_SUBPROJECT_OPTIONS.map(name => `
+                <div class="flex items-center">
+                    <input id="sub-${name.replace(/\s/g, '-')}" type="checkbox" value="${name}" 
+                           class="h-4 w-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500">
+                    <label for="sub-${name.replace(/\s/g, '-')}" class="ml-2 text-sm font-medium text-gray-700">${name}</label>
+                </div>
+            `).join('');
+        
+            return `
+                <div>
+                    <h2 class="text-xl font-semibold text-gray-700 mb-4">Ingresar Nuevo Proyecto</h2>
+                    
+                    <div class="grid md:grid-cols-2 gap-4 mb-4">
+                        <input type="text" id="input-project-name" placeholder="Nombre del Proyecto (e.g., Proyecto Urbano B-1)"
+                            class="p-3 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500">
+                            
+                        <input type="text" id="input-project-code" placeholder="Código (e.g., PRO-001)"
+                            class="p-3 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500 uppercase">
+                    </div>
+        
+                    <h3 class="font-medium text-gray-700 mb-2">Seleccionar Subproyectos Requeridos:</h3>
+                    <div id="subproject-checklist" class="grid grid-cols-2 md:grid-cols-4 gap-3 p-4 bg-gray-50 rounded-lg mb-6 border border-gray-200">
+                        ${subprojectChecklist}
+                    </div>
+        
+                    <button onclick="createProject()"
+                            class="w-full bg-blue-600 text-white p-3 rounded-lg font-semibold hover:bg-blue-700 transition duration-150">
+                        Guardar Proyecto (En Tiempo Real)
+                    </button>
+                </div>
+            `;
+        }
+        
+        // --- 8.2. Tab 2: Tabla Resumen ---
+        
+        function renderSummaryTab() {
+            if (projectsData.length === 0) return '';
+            
+            // 1. Generar encabezados dinámicos
+            const subprojectHeaders = ALL_SUBPROJECT_OPTIONS.map(name => `
+                <th class="summary-cell p-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider border-b-2 border-gray-200">${name}</th>
+            `).join('');
+        
+            // 2. Generar filas de proyectos
+            const projectRows = projectsData.map(project => {
+                const subprojectCells = ALL_SUBPROJECT_OPTIONS.map(subName => {
+                    const sub = project.subProjects.find(s => s.name === subName);
+                    
+                    if (sub) {
+                        const comments = Array.isArray(sub.comments) ? sub.comments : [];
+                        const currentStatusIndex = sub.status;
+
+                        // Sanitizar el objeto de comentarios antes de pasarlo a la función onclick
+                        const commentsJsonString = JSON.stringify(comments).replace(/"/g, '&quot;');
+                        
+                        return `
+                            <td class="summary-cell p-4 whitespace-nowrap border-b border-gray-200 bg-white">
+                                <div class="flex flex-col space-y-2">
+                                    <!-- Selector de Estado -->
+                                    <select onchange="updateSubprojectStatus('${project.id}', '${sub.id}', parseInt(this.value))"
+                                            class="p-2 border border-gray-300 rounded-lg text-sm w-full focus:ring-blue-500 focus:border-blue-500 bg-white">
+                                        ${STATUSES.map((s, index) => `
+                                            <option value="${index}" ${currentStatusIndex === index ? 'selected' : ''}>${s.name}</option>
+                                        `).join('')}
+                                    </select>
+                                    <!-- Botón de Notas/Comentarios (usa el modal para esta vista) -->
+                                    <button onclick="openModal('comments-modal', '${project.id}', '${sub.id}', '${sub.name}', '${commentsJsonString}')"
+                                        class="text-blue-600 hover:text-blue-800 transition text-xs font-medium text-center">
+                                        Notas (${comments.length})
+                                    </button>
+                                </div>
+                            </td>
+                        `;
+                    } else {
+                        // Subproyecto no seleccionado para este proyecto
+                        return `<td class="summary-cell p-4 whitespace-nowrap border-b border-gray-200 text-center text-gray-300">N/A</td>`;
+                    }
+                }).join('');
+        
+                return `
+                    <tr class="project-row">
+                        <td class="p-2 text-sm font-semibold text-gray-800 border-b border-gray-200 bg-gray-50 sticky-col-left-1" style="min-width: 80px;">${project.code}</td>
+                        <td class="p-4 font-medium text-gray-700 border-b border-gray-200 bg-gray-50 sticky-col-left-2" style="min-width: 200px;">
+                            <div class="flex items-center justify-between">
+                                <span>${project.name}</span>
+                                <button onclick="openEditSubprojectsModal('${project.id}')" title="Editar subproyectos" 
+                                    class="text-blue-500 hover:text-blue-700 transition p-1 rounded-full hover:bg-blue-100">
+                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-7-9l5 5m-5-9l-5 5" />
+                                    </svg>
+                                </button>
+                            </div>
+                            <p class="text-xs text-gray-400 mt-1">Última act. por: ${project.lastUpdatedBy || 'N/A'}</p>
+                        </td>
+                        ${subprojectCells}
+                    </tr>
+                `;
+            }).join('');
+            
+            return `
+                <div class="overflow-x-auto custom-scroll">
+                    <table class="min-w-full divide-y divide-gray-200">
+                        <thead>
+                            <tr>
+                                <th class="p-2 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider border-b-2 border-gray-200 sticky-col-left-1 bg-gray-50 z-20" style="min-width: 80px;">Código</th>
+                                <th class="p-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider border-b-2 border-gray-200 sticky-col-left-2 bg-gray-50 z-20" style="min-width: 200px;">Nombre</th>
+                                ${subprojectHeaders}
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-gray-200">
+                            ${projectRows}
+                        </tbody>
+                    </table>
+                </div>
+            `;
+        }
+        
+        // --- 8.3. Tab 3: Detalle y Notas (Lógica de Renderizado similar a la anterior) ---
+        
+        function renderProjectListDetail() {
+            return projectsData.map(project => `
+                <li onclick="selectDetailProject('${project.id}')" 
+                    class="p-3 cursor-pointer hover:bg-gray-100 transition rounded-lg ${currentDetailProject && currentDetailProject.id === project.id ? 'bg-blue-50 font-semibold text-blue-700' : 'text-gray-700'}">
+                    ${project.code} - ${project.name}
+                </li>
+            `).join('');
+        }
+        
+        function renderDetailTab() {
+            if (projectsData.length === 0) {
+                 return '<div class="p-8 text-center text-gray-500">No hay proyectos creados. Ve a la pestaña "1. Ingreso de Proyecto" para empezar.</div>';
+            }
+            
+            if (!currentDetailProject && projectsData.length > 0) {
+                currentDetailProject = projectsData[0];
+            }
+            
+            if (currentDetailProject && !projectsData.find(p => p.id === currentDetailProject.id)) {
+                 currentDetailProject = projectsData[0];
+                 selectedSubprojectId = null;
+            }
+
+            const projectName = currentDetailProject ? currentDetailProject.name : 'Selecciona un proyecto';
+            
+            return `
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-6 h-full min-h-[500px]">
+                    <!-- Columna 1: Lista de Proyectos -->
+                    <div class="md:col-span-1 bg-gray-50 p-4 rounded-xl border border-gray-200 overflow-y-auto custom-scroll">
+                        <h3 class="text-lg font-bold mb-3 text-gray-700">Seleccionar Proyecto:</h3>
+                        <ul id="project-list-detail" class="space-y-1">
+                            ${renderProjectListDetail()}
+                        </ul>
+                    </div>
+        
+                    <!-- Columna 2/3: Detalle de Subproyectos y Notas -->
+                    <div class="md:col-span-2 flex flex-col space-y-4">
+                        <!-- Subproyectos del Proyecto Seleccionado -->
+                        <div class="bg-white p-4 rounded-xl border border-gray-200">
+                            <h3 class="text-lg font-bold mb-3 text-gray-700">Subproyectos de: <span class="text-blue-600">${projectName}</span></h3>
+                            <div id="subprojects-detail-list" class="space-y-2">
+                                <!-- Los subproyectos se renderizan aquí -->
+                                ${currentDetailProject ? '<p class="text-gray-500">Selecciona un subproyecto para ver las notas.</p>' : 'Selecciona un proyecto de la lista de la izquierda.'}
+                            </div>
+                        </div>
+        
+                        <!-- Sección de Notas para Subproyecto Seleccionado -->
+                        <div id="detail-notes-section" class="bg-white p-4 rounded-xl border border-gray-200 flex-grow hidden">
+                            <h4 class="text-lg font-bold mb-3 text-gray-700">Notas para: <span id="detail-subproject-title" class="text-green-600"></span></h4>
+                            <div class="h-4/5 flex flex-col">
+                                <!-- Lista de Notas -->
+                                <div id="detail-notes-list" class="flex-grow overflow-y-auto custom-scroll space-y-3 mb-4 p-2 border rounded-lg bg-gray-50">
+                                    <!-- Notas se inyectarán aquí -->
+                                </div>
+                                
+                                <!-- Formulario de Notas -->
+                                <textarea id="detail-comment-input" placeholder="Añadir una nueva nota..."
+                                    class="w-full p-3 border border-gray-300 rounded-lg focus:ring-green-500 focus:border-green-500 mb-2 resize-none"></textarea>
+                                <button onclick="addCommentFromDetail()"
+                                    class="w-full bg-green-600 text-white p-3 rounded-lg font-semibold hover:bg-green-700 transition duration-150">
+                                    Guardar Nota
+                                </button>
+                                <p id="detail-comment-error" class="text-red-500 text-sm mt-2 hidden">La nota no puede estar vacía.</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+        
+        /**
+         * Selecciona un proyecto en la vista de Detalle (Tab 3).
+         */
+        window.selectDetailProject = (projectId) => {
+            currentDetailProject = projectsData.find(p => p.id === projectId);
+            selectedSubprojectId = null; // Resetear la selección del subproyecto
+            
+            renderTabContent(); // Re-renderizar para actualizar la UI
+        };
+        
+        /**
+         * Renderiza los subproyectos de un proyecto seleccionado en Tab 3.
+         */
+        function renderDetailSubprojects(projectId) {
+            const project = projectsData.find(p => p.id === projectId);
+            const listEl = document.getElementById('subprojects-detail-list');
+            
+            if (!project || !listEl) return;
+            
+            const subprojectsHtml = project.subProjects.map(sub => {
+                const status = STATUSES[sub.status] || STATUSES[0];
+                return `
+                    <div onclick="selectDetailSubproject('${project.id}', '${sub.id}')"
+                         class="flex justify-between items-center p-3 border rounded-lg cursor-pointer hover:bg-blue-50 transition ${sub.id === selectedSubprojectId ? 'bg-blue-100 border-blue-400' : 'bg-white border-gray-200'}">
+                        <span class="font-medium text-gray-700">${sub.name} (${(sub.comments || []).length} Notas)</span>
+                        <span class="status-pill ${status.class}">${status.name}</span>
+                    </div>
+                `;
+            }).join('');
+            
+            listEl.innerHTML = subprojectsHtml;
+        }
+        
+        /**
+         * Selecciona un subproyecto para ver sus notas en Tab 3.
+         */
+        window.selectDetailSubproject = (projectId, subprojectId) => {
+            selectedProjectId = projectId;
+            selectedSubprojectId = subprojectId;
+            
+            const project = projectsData.find(p => p.id === projectId);
+            const subproject = project?.subProjects.find(s => s.id === selectedSubprojectId);
+        
+            if (subproject) {
+                const titleEl = document.getElementById('detail-subproject-title');
+                if (titleEl) titleEl.textContent = subproject.name;
+                
+                const notesSection = document.getElementById('detail-notes-section');
+                if(notesSection) notesSection.classList.remove('hidden');
+                
+                renderDetailSubprojects(projectId); // Para marcar el subproyecto seleccionado
+                renderDetailSubproject(projectId, subproject); // Renderizar las notas y el formulario
+            }
+        };
+        
+        /**
+         * Renderiza el contenido de notas para el subproyecto seleccionado en Tab 3.
+         */
+        function renderDetailSubproject(projectId, subproject) {
+            selectedProjectId = projectId;
+            selectedSubprojectId = subproject.id;
+            
+            const commentsListElDetail = document.getElementById('detail-notes-list');
+            const comments = subproject.comments || [];
+            
+            if (!commentsListElDetail) return;
+            
+             commentsListElDetail.innerHTML = comments.length === 0
+                ? '<p class="text-center text-gray-400 italic mt-4">Aún no hay notas para este subproyecto.</p>'
+                : comments.map(comment => {
+                    const date = new Date(comment.timestamp);
+                    const formattedDate = date.toLocaleDateString('es-ES', { day: '2-digit', month: 'short' }) + ' ' +
+                                          date.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
+        
+                    return `
+                        <div class="bg-white p-3 rounded-lg border border-gray-200 shadow-sm">
+                            <p class="text-gray-700 mb-1">${comment.text}</p>
+                            <p class="text-xs text-gray-500 flex justify-between">
+                                <span>Autor: ${comment.authorId || 'N/A'}</span>
+                                <span>${formattedDate}</span>
+                            </p>
+                        </div>
+                    `;
+                }).join('');
+                
+            commentsListElDetail.scrollTop = commentsListElDetail.scrollHeight;
+        }
+        
+        
+        // --- 9. Lógica de Modales (Mantenida) ---
+        
+        /**
+         * Abre el modal de comentarios (usado en la vista de Resumen).
+         */
+        window.openModal = (modalId, projectId, subprojectId, subprojectName, commentsJsonString) => {
+            selectedProjectId = projectId;
+            selectedSubprojectId = subprojectId;
+            document.getElementById('modal-subproject-name').textContent = subprojectName;
+        
+            let comments;
+            try {
+                comments = JSON.parse(commentsJsonString.replace(/&quot;/g, '"'));
+            } catch (e) {
+                console.error("Error al parsear comentarios:", e);
+                comments = [];
+            }
+            
+            renderComments(comments); 
+        
+            const modalEl = document.getElementById(modalId);
+            modalEl.classList.remove('hidden');
+            modalEl.classList.add('flex');
+            document.getElementById('comment-input').focus();
+        };
+
+        /**
+         * Renderiza la lista de comentarios dentro del modal.
+         */
+        function renderComments(comments) {
+            const commentsListEl = document.getElementById('comments-list');
+            commentsListEl.innerHTML = comments.length === 0
+                ? '<p class="text-gray-500 italic">Aún no hay notas. Sé el primero.</p>'
+                : comments.map(comment => {
+                    const date = new Date(comment.timestamp);
+                    const formattedDate = date.toLocaleDateString('es-ES', { day: '2-digit', month: 'short' }) + ' ' +
+                                          date.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
+        
+                    return `
+                        <div class="bg-gray-50 p-4 rounded-lg border border-gray-200">
+                            <p class="text-gray-700 mb-2">${comment.text}</p>
+                            <p class="text-xs text-gray-500 flex justify-between">
+                                <span>Autor: ${comment.authorId || 'N/A'}</span>
+                                <span>${formattedDate}</span>
+                            </p>
+                        </div>
+                    `;
+                }).join('');
+            
+            const modalContent = document.getElementById('comments-modal').querySelector('.custom-scroll');
+            if (modalContent) {
+                setTimeout(() => { modalContent.scrollTop = modalContent.scrollHeight; }, 100); 
+            }
+        }
+        
+        // --- 9.1. Lógica del Modal de Edición de Subproyectos (Modificada para usar Firestore) ---
+
+        /**
+         * Abre el modal de edición de subproyectos.
+         */
+        window.openEditSubprojectsModal = (projectId) => {
+            selectedProjectId = projectId;
+            const project = projectsData.find(p => p.id === projectId);
+
+            if (!project) return;
+
+            document.getElementById('edit-modal-project-name').textContent = `${project.code} - ${project.name}`;
+            const checklistContainer = document.getElementById('edit-subproject-checklist');
+            
+            const currentSubprojectNames = project.subProjects.map(sp => sp.name);
+
+            checklistContainer.innerHTML = ALL_SUBPROJECT_OPTIONS.map(name => {
+                const isChecked = currentSubprojectNames.includes(name);
+                const id = `edit-sub-${name.replace(/\s/g, '-')}`;
+                return `
+                    <div class="flex items-center">
+                        <input id="${id}" type="checkbox" value="${name}" ${isChecked ? 'checked' : ''}
+                               class="h-4 w-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500 edit-subproject-checkbox">
+                        <label for="${id}" class="ml-2 text-sm font-medium text-gray-700">${name}</label>
+                    </div>
+                `;
+            }).join('');
+
+            const modalEl = document.getElementById('edit-modal');
+            modalEl.classList.remove('hidden');
+            modalEl.classList.add('flex');
+        };
+
+        /**
+         * Guarda los cambios de subproyectos editados en Firestore.
+         */
+        window.saveEditedSubprojects = () => {
+            if (!selectedProjectId) return;
+
+            const project = projectsData.find(p => p.id === selectedProjectId);
+            if (!project) return;
+            
+            const selectedCheckboxes = document.querySelectorAll('#edit-subproject-checklist input.edit-subproject-checkbox:checked');
+            const newSubprojectNames = Array.from(selectedCheckboxes).map(cb => cb.value);
+            
+            if (newSubprojectNames.length === 0) {
+                showMessage("Error de Edición", "Un proyecto debe tener al menos un subproyecto. No se guardaron los cambios.");
+                return;
+            }
+
+            const updatedSubProjects = [];
+
+            // 1. Mantener subproyectos existentes y su estado/notas
+            project.subProjects.forEach(oldSub => {
+                if (newSubprojectNames.includes(oldSub.name)) {
+                    updatedSubProjects.push(oldSub);
+                }
+            });
+
+            // 2. Añadir nuevos subproyectos con estado 'Pendiente'
+            const existingNames = updatedSubProjects.map(sp => sp.name);
+            newSubprojectNames.forEach(newName => {
+                if (!existingNames.includes(newName)) {
+                    updatedSubProjects.push({
+                        id: generateId(),
+                        name: newName,
+                        status: 0, // Pendiente
+                        comments: []
+                    });
+                }
+            });
+
+            // Actualizar el proyecto y guardarlo en Firestore
+            const updatedProject = {
+                ...project,
+                subProjects: updatedSubProjects,
+                lastUpdatedBy: userId
+            };
+            
+            saveProjectToFirestore(updatedProject);
+            
+            closeModal('edit-modal');
+            // onSnapshot se encargará de refrescar el contenido.
+        };
+
+        
+        // Permitir cerrar los modales haciendo click fuera
+        const modals = ['comments-modal', 'edit-modal', 'message-modal'];
+        modals.forEach(id => {
+            const modalEl = document.getElementById(id);
+            if (modalEl) {
+                modalEl.addEventListener('click', (e) => {
+                    // Evitar cerrar el modal si el clic fue dentro del contenido
+                    if (e.target === modalEl) {
+                        window.closeModal(id);
+                    }
+                });
+            }
+        });
+        
+        // --- 10. Inicialización ---
+        
+        /**
+         * Inicia la aplicación al cargar la página.
+         */
+        function initializeApp() {
+            // No cargamos de LocalStorage, inicializamos Firebase
+            initializeFirebase();
+            // La primera renderización mostrará el mensaje de "Conectando..."
+            renderTabContent(); 
+        }
+
+        document.addEventListener('DOMContentLoaded', initializeApp);
+    </script>
+    <!-- FIN DE CÓDIGO JAVASCRIPT -->
+</body>
+</html>
